@@ -43,7 +43,7 @@ class Staff extends Model
         return $this->belongsToMany(Role::class, 'staff_role');
     }
 
-      public function department()
+    public function department()
     {
         return $this->belongsTo(Department::class);
     }
@@ -63,7 +63,7 @@ class Staff extends Model
         return $this->belongsTo(Staff::class, 'staff_manager_id');
     }
 
-     public function staffType()
+    public function staffType()
     {
         return $this->belongsTo(StaffType::class);
     }

@@ -7,6 +7,7 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
+use Illuminate\Support\Facades\Hash;
 
 class User extends Authenticatable implements JWTSubject
 {
@@ -19,15 +20,21 @@ class User extends Authenticatable implements JWTSubject
         'phone',
         'password',
         'is_active',
+        'must_change_password',
+        'otp',
+        'otp_expires_at',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'otp',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'must_change_password' => 'boolean',
+        'otp_expires_at' => 'datetime',
     ];
 
     // --- JWTSubject ---
@@ -68,9 +75,54 @@ class User extends Authenticatable implements JWTSubject
         return in_array($this->staff->role->slug, $slugs, true);
     }
 
+    public function generateOTP()
+    {
+        $this->otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $this->otp_expires_at = now()->addMinutes(15);
+        $this->save();
+        
+        return $this->otp;
+    }
+
+   // app/Models/User.php
+
+public function verifyOTP($otp)
+{
+    // Check if OTP exists and not expired
+    if (!$this->otp || !$this->otp_expires_at) {
+        return false;
+    }
+
+    // Check if OTP is expired
+    if (now()->gt($this->otp_expires_at)) {
+        return false;
+    }
+
+    // Check if OTP matches (trim and compare)
+    $provided = trim($otp);
+    $stored = trim($this->otp);
+    
+    return $provided === $stored;
+}
+
+    public function clearOTP()
+    {
+        $this->otp = null;
+        $this->otp_expires_at = null;
+        $this->save();
+    }
 
       public function user()
     {
         return $this->belongsTo(User::class);
     }
+
+    public function setPasswordAttribute($value)
+{
+    if ($value) {
+        $this->attributes['password'] = Hash::make($value);
+        // If password is set, user no longer needs to change it
+        $this->attributes['must_change_password'] = false;
+    }
+}
 }

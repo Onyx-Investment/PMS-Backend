@@ -1,4 +1,5 @@
 <?php
+// app/Models/Timesheet.php
 
 namespace App\Models;
 
@@ -7,8 +8,14 @@ use Illuminate\Database\Eloquent\Model;
 class Timesheet extends Model
 {
     protected $fillable = [
-        'user_id', 'week_start', 'week_end', 'submitted_at',
-        'approved_by', 'approved_at', 'status',
+        'user_id', 
+        'week_start', 
+        'week_end', 
+        'submitted_at',
+        'approved_by', 
+        'approved_at', 
+        'status',
+        'review_notes',
     ];
 
     protected $casts = [
@@ -37,9 +44,6 @@ class Timesheet extends Model
 
     public function getTotalHoursAttribute()
     {
-        // Uses already-loaded entries when available to avoid an extra
-        // query on every timesheet in a list; falls back to a query
-        // when entries weren't eager-loaded.
         if ($this->relationLoaded('entries')) {
             return (float) $this->entries->sum('hours');
         }

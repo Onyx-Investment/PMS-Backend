@@ -9,6 +9,9 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\WelcomeOTPMail;
+
 
 class StaffController extends Controller
 {
@@ -36,6 +39,37 @@ class StaffController extends Controller
         return response()->json($staff);
     }
 
+    /**
+     * Generate a unique employee number
+     * Format: EMP-YYYY-XXXXX (e.g., EMP-2026-00001)
+     */
+    private function generateEmployeeNumber(): string
+    {
+        $prefix = 'EMP';
+        $year = date('Y');
+        
+        $lastStaff = Staff::where('employee_no', 'like', "{$prefix}-{$year}-%")
+            ->orderBy('employee_no', 'desc')
+            ->first();
+        
+        if ($lastStaff) {
+            $parts = explode('-', $lastStaff->employee_no);
+            $lastSequence = intval(end($parts));
+            $sequence = str_pad($lastSequence + 1, 5, '0', STR_PAD_LEFT);
+        } else {
+            $sequence = '00001';
+        }
+        
+        $code = "{$prefix}-{$year}-{$sequence}";
+        
+        while (Staff::where('employee_no', $code)->exists()) {
+            $sequence = str_pad(intval($sequence) + 1, 5, '0', STR_PAD_LEFT);
+            $code = "{$prefix}-{$year}-{$sequence}";
+        }
+        
+        return $code;
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -43,8 +77,7 @@ class StaffController extends Controller
             'last_name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'phone' => 'nullable|string|max:255',
-            'password' => 'required|string|min:8',
-            'employee_no' => 'required|string|unique:staff,employee_no',
+            'employee_no' => 'nullable|string|unique:staff,employee_no',
             'staff_type_id' => 'nullable|exists:staff_types,id',
             'designation' => 'nullable|string|max:255',
             'department_ids' => 'nullable|array',
@@ -56,16 +89,23 @@ class StaffController extends Controller
             'status' => 'nullable|in:active,inactive,on_leave',
             'joined_date' => 'nullable|date',
             'cost_per_hour' => 'nullable|numeric|min:0',
+            'auto_generate_employee_no' => 'boolean',
         ]);
 
-        // Create user account
+        // Auto-generate employee number if requested or if no code provided
+        if (($request->auto_generate_employee_no ?? false) || empty($data['employee_no'])) {
+            $data['employee_no'] = $this->generateEmployeeNumber();
+        }
+
+        // Create user account with must_change_password flag
         $user = User::create([
             'first_name' => $data['first_name'],
             'last_name' => $data['last_name'],
             'email' => $data['email'],
             'phone' => $data['phone'],
-            'password' => Hash::make($data['password']),
+            'password' => null, // No password initially
             'is_active' => true,
+            'must_change_password' => true, // Force password change on first login
         ]);
 
         // Create staff record
@@ -82,6 +122,9 @@ class StaffController extends Controller
         ];
         
         $staff = Staff::create($staffData);
+        $updateUser = User::find($user->id);
+        $updateUser->employee_no = $data['employee_no'];
+        $updateUser->save();
 
         // Attach departments
         if (!empty($data['department_ids'])) {
@@ -93,12 +136,31 @@ class StaffController extends Controller
             $staff->roles()->attach($data['role_ids']);
         }
 
-        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel']), 201);
+        $otp = $user->generateOTP();
+    
+    try {
+        Mail::to($user->email)->send(new WelcomeOTPMail($user, $otp));
+    } catch (\Exception $e) {
+        // Log the error but don't fail the request
+        \Log::error('Failed to send welcome email: ' . $e->getMessage());
+        // You might want to notify the admin or retry
+    }
+
+    return response()->json([
+        'message' => 'Staff created successfully. An OTP has been sent to their email.',
+        'staff' => $staff->load(['user', 'departments', 'roles', 'gradeLevel']),
+    ], 201);
+
+        // return response()->json([
+        //     'message' => 'Staff created successfully. An OTP has been sent to their email.',
+        //     'staff' => $staff->load(['user', 'departments', 'roles', 'gradeLevel']),
+        //     'otp' => $otp, // Remove this in production
+        // ], 201);
     }
 
     public function show(Staff $staff)
     {
-        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel', 'staffManager']));
+        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel', 'staffManager', 'staffType']));
     }
 
     public function update(Request $request, Staff $staff)
@@ -137,29 +199,23 @@ class StaffController extends Controller
             $staff->user->update($userData);
         }
 
-        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel']));
+        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel', 'staffType']));
     }
 
     public function destroy(Staff $staff)
     {
-        // Check if staff is assigned to any projects
         if ($staff->projectMemberships()->count() > 0) {
             return response()->json([
                 'message' => 'Cannot delete staff member as they are assigned to projects'
             ], 422);
         }
 
-        // Detach relationships
         $staff->departments()->detach();
         $staff->roles()->detach();
 
-        // Get the user before deleting staff
         $user = $staff->user;
-        
-        // Delete staff record
         $staff->delete();
         
-        // Deactivate user account
         if ($user) {
             $user->update(['is_active' => false]);
         }
@@ -169,12 +225,18 @@ class StaffController extends Controller
 
     public function getActiveStaff()
     {
-        $staff = Staff::with(['user', 'departments', 'roles', 'gradeLevel'])
+        $staff = Staff::with(['user', 'departments', 'roles', 'gradeLevel', 'staffType'])
             ->where('status', 'active')
             ->whereHas('user', fn($q) => $q->where('is_active', true))
             ->orderBy('created_at', 'desc')
             ->get();
 
         return response()->json($staff);
+    }
+
+    public function previewEmployeeNumber()
+    {
+        $code = $this->generateEmployeeNumber();
+        return response()->json(['employee_no' => $code]);
     }
 }

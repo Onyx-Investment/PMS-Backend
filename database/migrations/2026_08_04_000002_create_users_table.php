@@ -20,7 +20,7 @@ return new class extends Migration
             // $table->string('phoneNumber')->nullable();
             // $table->string('alternatePhoneNumber')->nullable();
             $table->timestamp('email_verified_at')->nullable();
-            $table->string('password');
+            $table->string('password')->nullable();
             // $table->unsignedBigInteger('role')->nullable();
             // $table->unsignedBigInteger('facilityId')->nullable();
             // $table->string('status')->default('active');

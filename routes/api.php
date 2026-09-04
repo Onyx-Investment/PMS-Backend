@@ -27,11 +27,15 @@ use App\Http\Controllers\Api\StaffTypeController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/request-otp', [AuthController::class, 'requestOTP']);
+Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
 
 Route::middleware('auth:api')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
+    
+    Route::get('/staff/preview-employee-no', [StaffController::class, 'previewEmployeeNumber']);
 
     Route::apiResource('staff-types', StaffTypeController::class);
     Route::get('/staff-types/active/list', [StaffTypeController::class, 'getActiveTypes']);
@@ -126,18 +130,31 @@ Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries
     // --- Timesheets ---
     // routes/api.php
 
+    // Route::get('/timesheets', [TimesheetController::class, 'index']);
+    // Route::post('/timesheets', [TimesheetController::class, 'store']);
+    // Route::get('/timesheets/{timesheet}', [TimesheetController::class, 'show']);
+    // Route::post('/timesheets/{timesheet}/submit', [TimesheetController::class, 'submit']);
+    // Route::post('/timesheets/{timesheet}/reopen', [TimesheetController::class, 'reopen']);
+    // Route::post('/timesheets/{timesheet}/approve', [TimesheetController::class, 'approve'])
+    //     ->middleware('role:assignment_manager,assignment_lead,staff_manager,admin');
+    // Route::post('/timesheets/{timesheet}/reject', [TimesheetController::class, 'reject']);
+
+
+        // Timesheets
     Route::get('/timesheets', [TimesheetController::class, 'index']);
     Route::post('/timesheets', [TimesheetController::class, 'store']);
     Route::get('/timesheets/{timesheet}', [TimesheetController::class, 'show']);
     Route::post('/timesheets/{timesheet}/submit', [TimesheetController::class, 'submit']);
     Route::post('/timesheets/{timesheet}/reopen', [TimesheetController::class, 'reopen']);
+    Route::delete('/timesheets/{timesheet}', [TimesheetController::class, 'destroy']);
+    
+    // Approval routes - restricted to managers
     Route::post('/timesheets/{timesheet}/approve', [TimesheetController::class, 'approve'])
-        ->middleware('role:assignment_manager,assignment_lead,staff_manager,admin');
+        ->middleware('role:assignment_manager,assignment_lead,staff_manager,admin,ceo,coo,md');
     Route::post('/timesheets/{timesheet}/reject', [TimesheetController::class, 'reject'])
-        ->middleware('role:assignment_manager,assignment_lead,staff_manager,admin');
+        ->middleware('role:assignment_manager,assignment_lead,staff_manager,admin,ceo,coo,md');
 
     // --- Time entries ---
-    // routes/api.php
 Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries']);
     Route::post('/timesheets/{timesheet}/entries', [TimeEntryController::class, 'store']);
     Route::put('/timesheets/{timesheet}/entries/{entry}', [TimeEntryController::class, 'update']);
@@ -147,8 +164,7 @@ Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries
     Route::get('/weekly-reports', [WeeklyReportController::class, 'index']);
     Route::post('/weekly-reports', [WeeklyReportController::class, 'store']);
     Route::post('/weekly-reports/{weeklyReport}/submit', [WeeklyReportController::class, 'submit']);
-    Route::post('/weekly-reports/{weeklyReport}/review', [WeeklyReportController::class, 'review'])
-        ->middleware('role:assignment_manager,assignment_lead,admin');
+    Route::post('/weekly-reports/{weeklyReport}/review', [WeeklyReportController::class, 'review']);
 
     // --- Leads ---
     Route::apiResource('leads', LeadController::class);

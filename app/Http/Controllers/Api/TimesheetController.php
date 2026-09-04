@@ -15,7 +15,7 @@ class TimesheetController extends Controller
         $user = $request->user();
         $canViewOthers = $user->hasRole('assignment_manager', 'assignment_lead', 'staff_manager', 'admin', 'ceo', 'coo', 'md');
 
-        $timesheets = Timesheet::with('user', 'entries.project', 'entries.task', 'entries.timeCode')
+        $timesheets = Timesheet::with(['user', 'entries.project', 'entries.task', 'entries.timeCode'])
             ->when(
                 $request->user_id && $canViewOthers,
                 fn ($q) => $q->where('user_id', $request->user_id)
@@ -70,6 +70,16 @@ class TimesheetController extends Controller
 
     public function approve(Request $request, Timesheet $timesheet)
     {
+        // Check if user has permission to approve
+        $user = $request->user();
+        if (!$user->hasRole('assignment_manager', 'assignment_lead', 'staff_manager', 'admin', 'ceo', 'coo', 'md')) {
+            return response()->json(['message' => 'You do not have permission to approve timesheets.'], 403);
+        }
+
+        if ($timesheet->status !== 'submitted') {
+            return response()->json(['message' => 'Only submitted timesheets can be approved.'], 422);
+        }
+
         $timesheet->update([
             'status' => 'approved',
             'approved_by' => $request->user()->id,
@@ -83,7 +93,24 @@ class TimesheetController extends Controller
 
     public function reject(Request $request, Timesheet $timesheet)
     {
-        $timesheet->update(['status' => 'rejected']);
+        // Check if user has permission to reject
+        $user = $request->user();
+        if (!$user->hasRole('assignment_manager', 'assignment_lead', 'staff_manager', 'admin', 'ceo', 'coo', 'md')) {
+            return response()->json(['message' => 'You do not have permission to reject timesheets.'], 403);
+        }
+
+        if ($timesheet->status !== 'submitted') {
+            return response()->json(['message' => 'Only submitted timesheets can be rejected.'], 422);
+        }
+
+        $data = $request->validate([
+            'review_notes' => 'nullable|string',
+        ]);
+
+        $timesheet->update([
+            'status' => 'rejected',
+            'review_notes' => $data['review_notes'] ?? null,
+        ]);
 
         return response()->json($timesheet);
     }
@@ -92,9 +119,37 @@ class TimesheetController extends Controller
     {
         $this->authorizeOwnTimesheet($request, $timesheet);
 
+        // Only rejected timesheets can be reopened
+        if ($timesheet->status !== 'rejected') {
+            return response()->json(['message' => 'Only rejected timesheets can be reopened.'], 422);
+        }
+
         $timesheet->update(['status' => 'draft']);
 
         return response()->json($timesheet);
+    }
+
+    public function destroy(Request $request, Timesheet $timesheet)
+    {
+        // Check if user has permission to delete
+        $user = $request->user();
+        $isOwner = $timesheet->user_id === $user->id;
+        $canDeleteOthers = $user->hasRole('assignment_manager', 'assignment_lead', 'staff_manager', 'admin', 'ceo', 'coo', 'md');
+
+        if (!$isOwner && !$canDeleteOthers) {
+            return response()->json(['message' => 'You do not have permission to delete this timesheet.'], 403);
+        }
+
+        // Only draft or rejected timesheets can be deleted
+        if (!in_array($timesheet->status, ['draft', 'rejected'])) {
+            return response()->json(['message' => 'Only draft or rejected timesheets can be deleted.'], 422);
+        }
+
+        // Delete all entries first
+        $timesheet->entries()->delete();
+        $timesheet->delete();
+
+        return response()->json(['message' => 'Timesheet deleted successfully.']);
     }
 
     private function authorizeOwnTimesheet(Request $request, Timesheet $timesheet): void

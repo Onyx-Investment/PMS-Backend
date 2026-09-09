@@ -23,6 +23,11 @@ use App\Http\Controllers\Api\ProposalController;
 use App\Http\Controllers\Api\StaffController;
 use App\Http\Controllers\Api\GradeLevelController;
 use App\Http\Controllers\Api\StaffTypeController;
+use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\ProjectReportController;
+use App\Http\Controllers\Api\StepController;
+use App\Http\Controllers\Api\StaffDocumentController;
+use App\Http\Controllers\Api\InternalTaskController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -56,7 +61,33 @@ Route::middleware('auth:api')->group(function () {
     
     // Grade levels
     Route::apiResource('grade-levels', GradeLevelController::class);
-    
+    Route::get('/grade-levels/category/{category}', [GradeLevelController::class, 'getByCategory']);
+    Route::get('/grade-levels/backend/{backendCode}', [GradeLevelController::class, 'findByBackendCode']);
+
+    // Staff Passport Upload
+Route::post('/staff/{staff}/passport', [StaffController::class, 'uploadPassport']);
+
+// Staff Documents
+Route::get('/staff/{staff}/documents', [StaffDocumentController::class, 'index']);
+Route::post('/staff/{staff}/documents', [StaffDocumentController::class, 'store']);
+Route::delete('/staff/documents/{document}', [StaffDocumentController::class, 'destroy']);
+Route::get('/staff/documents/{document}/download', [StaffDocumentController::class, 'download']);
+
+// Steps (for Grade Levels)
+Route::apiResource('steps', StepController::class);
+Route::get('/steps/by-grade/{gradeLevelId}', [StepController::class, 'getByGradeLevel']);
+
+
+Route::prefix('internal-tasks')->group(function () {
+    Route::get('/', [InternalTaskController::class, 'index']);
+    Route::post('/', [InternalTaskController::class, 'store']);
+    Route::get('/{internalTask}', [InternalTaskController::class, 'show']);
+    Route::put('/{internalTask}', [InternalTaskController::class, 'update']);
+    Route::delete('/{internalTask}', [InternalTaskController::class, 'destroy']);
+    Route::post('/bulk', [InternalTaskController::class, 'bulkStore']);
+});
+
+
     // User management (basic)
     Route::get('/users', [UserController::class, 'index']);
     Route::get('/users/{user}', [UserController::class, 'show']);
@@ -119,10 +150,15 @@ Route::middleware('auth:api')->group(function () {
     // routes/api.php - Inside auth:api group
 
 // Time codes
-Route::get('/time-codes', [TimeCodeController::class, 'index']);
-Route::post('/time-codes', [TimeCodeController::class, 'store']);
-Route::put('/time-codes/{timeCode}', [TimeCodeController::class, 'update']);
-Route::delete('/time-codes/{timeCode}', [TimeCodeController::class, 'destroy']);
+
+Route::prefix('time-codes')->group(function () {
+    Route::get('/', [TimeCodeController::class, 'index']);
+    Route::post('/', [TimeCodeController::class, 'store']);
+    Route::get('/{timeCode}', [TimeCodeController::class, 'show']);
+    Route::put('/{timeCode}', [TimeCodeController::class, 'update']);
+    Route::delete('/{timeCode}', [TimeCodeController::class, 'destroy']);
+    Route::get('/{timeCode}/tasks', [InternalTaskController::class, 'getTasksByTimeCode']);
+});
 
 // Time entries for staff/project
 Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries']);
@@ -200,4 +236,13 @@ Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries
     // --- Departments and Roles (public read) ---
     Route::get('/departments', [DepartmentController::class, 'index']);
     Route::get('/roles', [RoleController::class, 'index']);
+
+
+
+    // Reports
+    Route::get('/reports/timesheet', [ReportController::class, 'timesheet']);
+    Route::get('/reports/timesheet/export', [ReportController::class, 'export']);
+
+    Route::get('/reports/project/{projectId}', [ProjectReportController::class, 'generate']);
+    Route::get('/reports/project/{projectId}/export', [ProjectReportController::class, 'export']);
 });

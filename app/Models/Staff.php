@@ -12,12 +12,20 @@ class Staff extends Model
         'employee_no',
         'designation',
         'grade_level_id',
+        'step_id',
         'staff_manager_id',
         'staff_type_id',
         'status',
         'joined_date',
         'cost_per_hour',
         'is_active',
+        'nin',
+        'gender',
+        'marital_status',
+        'bank_name',
+        'bank_account_number',
+        'bank_account_name',
+        'passport',
     ];
 
     protected $casts = [
@@ -58,6 +66,11 @@ class Staff extends Model
         return $this->belongsTo(GradeLevel::class);
     }
 
+    public function step()
+    {
+        return $this->belongsTo(Step::class);
+    }
+
     public function staffManager()
     {
         return $this->belongsTo(Staff::class, 'staff_manager_id');
@@ -67,6 +80,13 @@ class Staff extends Model
     {
         return $this->belongsTo(StaffType::class);
     }
+
+    public function documents()
+    {
+        return $this->hasMany(StaffDocument::class);
+    }
+
+    
 
     public function directReports()
     {

@@ -11,7 +11,14 @@ class TimeCodeController extends Controller
 {
     public function index(Request $request)
     {
-        $codes = TimeCode::with('project')
+        $query = TimeCode::with('project');
+
+        // Conditionally load internal tasks
+        if ($request->has('with_tasks') && $request->with_tasks) {
+            $query->with('internalTasks');
+        }
+
+        $codes = $query
             ->when($request->project_id, fn ($q) => $q->where('project_id', $request->project_id))
             ->when($request->category, fn ($q) => $q->where('category', $request->category))
             ->orderBy('code')
@@ -31,7 +38,7 @@ class TimeCodeController extends Controller
 
         $code = TimeCode::create($data);
 
-        return response()->json($code->load('project'), 201);
+        return response()->json($code->load('project', 'internalTasks'), 201);
     }
 
     public function update(Request $request, TimeCode $timeCode)
@@ -45,7 +52,7 @@ class TimeCodeController extends Controller
 
         $timeCode->update($data);
 
-        return response()->json($timeCode->load('project'));
+        return response()->json($timeCode->load('project', 'internalTasks'));
     }
 
     public function destroy(TimeCode $timeCode)
@@ -54,6 +61,13 @@ class TimeCodeController extends Controller
         if ($timeCode->timeEntries()->count() > 0) {
             return response()->json([
                 'message' => 'Cannot delete time code as it is being used in time entries'
+            ], 422);
+        }
+
+        // Check if time code has internal tasks
+        if ($timeCode->internalTasks()->count() > 0) {
+            return response()->json([
+                'message' => 'Cannot delete time code as it has internal tasks associated. Delete the tasks first.'
             ], 422);
         }
 

@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\WelcomeOTPMail;
+Use Illuminate\Support\Facades\Storage;
 
 
 class StaffController extends Controller
@@ -178,6 +179,13 @@ class StaffController extends Controller
             'status' => 'nullable|in:active,inactive,on_leave',
             'joined_date' => 'nullable|date',
             'cost_per_hour' => 'nullable|numeric|min:0',
+            'gender' => 'nullable|in:male,female',
+            'marital_status' => 'nullable|in:single,married,divorced,widowed',
+            'nin' => 'nullable|string|max:255',
+            'bank_name' => 'nullable|string|max:255',
+            'bank_account_number' => 'nullable|string|max:255',
+            'bank_account_name' => 'nullable|string|max:255',
+
         ]);
 
         // Update staff
@@ -239,4 +247,35 @@ class StaffController extends Controller
         $code = $this->generateEmployeeNumber();
         return response()->json(['employee_no' => $code]);
     }
+
+
+
+public function uploadPassport(Request $request, Staff $staff)
+{
+    $request->validate([
+        'passport' => 'required|image|max:2048|mimes:jpg,jpeg,png', // 2MB max
+    ]);
+
+    // $file = $request->file('passport');
+    // $path = $file->store('staff_passports/' . $staff->id, 'public');
+    
+    // $url = Storage::url($path);
+
+      // Handle photo upload
+        if ($request->hasFile('passport')) {
+            // Delete old photo if exists
+            if ($staff->passport && Storage::disk('public')->exists($staff->passport)) {
+                Storage::disk('public')->delete($staff->passport);
+            }
+
+            $photo = $request->file('passport');
+            $filename = time() . '_' . uniqid() . '.' . $photo->getClientOriginalExtension();
+            $path = $photo->storeAs('staff_passports', $filename, 'public');
+            $updateData['passport'] = $path;
+        }
+         $staff->update($updateData);
+    // $staff->update(['passport' => $url]);
+
+    return response()->json(['passport' => $updateData]);
+}
 }

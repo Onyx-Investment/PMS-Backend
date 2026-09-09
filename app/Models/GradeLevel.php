@@ -10,17 +10,27 @@ class GradeLevel extends Model
     protected $fillable = [
         'name',
         'level',
-        'cost_per_hour',
+        'backend_code',
+        'category',
         'description',
     ];
 
     protected $casts = [
-        'cost_per_hour' => 'decimal:2',
         'level' => 'integer',
     ];
 
     public function users()
     {
         return $this->hasMany(User::class);
+    }
+
+    public function staff()
+    {
+        return $this->hasMany(Staff::class);
+    }
+
+    public function steps()
+    {
+        return $this->hasMany(Step::class)->orderBy('step_number');
     }
 }

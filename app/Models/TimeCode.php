@@ -23,4 +23,9 @@ class TimeCode extends Model
     {
         return $this->hasMany(TimeEntry::class);
     }
+
+     public function internalTasks()
+    {
+        return $this->hasMany(InternalTask::class);
+    }
 }

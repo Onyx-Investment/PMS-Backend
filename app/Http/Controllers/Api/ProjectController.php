@@ -1,19 +1,22 @@
 <?php
+// app/Http/Controllers/Api/ProjectController.php
 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\ProjectTeam;
+use App\Models\Proposal;
 use Illuminate\Http\Request;
 
 class ProjectController extends Controller
 {
     public function index(Request $request)
     {
-        $projects = Project::with(['client', 'assignmentLead.user', 'assignmentManager.user'])
+        $projects = Project::with(['client', 'assignmentLead.user', 'assignmentManager.user', 'proposal'])
             ->when($request->status, fn ($q) => $q->where('status', $request->status))
             ->when($request->client_id, fn ($q) => $q->where('client_id', $request->client_id))
+            ->when($request->proposal_id, fn ($q) => $q->where('proposal_id', $request->proposal_id))
             ->orderByDesc('created_at')
             ->paginate(20);
 
@@ -24,58 +27,58 @@ class ProjectController extends Controller
     {
         $data = $request->validate([
             'project_code' => 'nullable|string|unique:projects,project_code',
+            'proposal_id' => 'required|exists:proposals,id',
             'client_id' => 'required|exists:clients,id',
             'title' => 'required|string|max:255',
             'assignment_type' => 'required|in:m&e,transaction,advisory,investment,training,research,internal,consulting',
-            'assignment_lead_id' => 'nullable|exists:staff,id', // Changed to staff
-            'assignment_manager_id' => 'nullable|exists:staff,id', // Changed to staff
-            'client_relationship_partner_id' => 'nullable|exists:staff,id', // Changed to staff
-            'budget_hours' => 'nullable|numeric',
-            'budget_cost' => 'nullable|numeric',
+            'assignment_lead_id' => 'nullable|exists:staff,id',
+            'assignment_manager_id' => 'nullable|exists:staff,id',
+            'client_relationship_partner_id' => 'nullable|exists:staff,id',
+            'project_value' => 'nullable|numeric|min:0',
             'planned_start' => 'nullable|date',
             'planned_end' => 'nullable|date|after_or_equal:planned_start',
             'auto_generate_code' => 'boolean',
-            'staff_assignments' => 'nullable|array',
-            'staff_assignments.*.staff_id' => 'required|exists:staff,id',
-            'staff_assignments.*.hours' => 'nullable|numeric',
-            'staff_assignments.*.cost_per_hour' => 'nullable|numeric',
         ]);
 
         // Auto-generate code if requested or if no code provided
         if (($request->auto_generate_code ?? false) || empty($data['project_code'])) {
-            $data['project_code'] = $this->generateProjectCode($request->client_id);
+            $data['project_code'] = $this->generateProjectCodeFromProposal($request->proposal_id);
         }
 
-        // Remove staff_assignments from project data
-        $staffAssignments = $data['staff_assignments'] ?? [];
-        unset($data['staff_assignments']);
+        // Get the proposal
+        $proposal = Proposal::with('lead')->find($data['proposal_id']);
 
         // Create project
         $project = Project::create($data);
 
-        // Save staff assignments to project_team table
-        if (!empty($staffAssignments)) {
-            foreach ($staffAssignments as $assignment) {
-                // Skip if no staff_id
-                if (empty($assignment['staff_id'])) continue;
-
-                ProjectTeam::create([
-                    'project_id' => $project->id,
-                    'staff_id' => $assignment['staff_id'],
-                    'role' => 'consultant', // Default role
-                    'planned_hours' => $assignment['hours'] ?? 0,
-                    'billable_rate' => $assignment['cost_per_hour'] ?? 0,
-                ]);
+        // Copy staff assignments from proposal's lead to project
+        if ($proposal && $proposal->lead) {
+            // If the lead has an owner, add them as a team member
+            if ($proposal->lead->owner_id) {
+                // Check if the owner is a staff member
+                $staff = \App\Models\Staff::where('user_id', $proposal->lead->owner_id)->first();
+                if ($staff) {
+                    ProjectTeam::create([
+                        'project_id' => $project->id,
+                        'staff_id' => $staff->id,
+                        'role' => 'lead',
+                        'planned_hours' => 0,
+                        'billable_rate' => 0,
+                    ]);
+                }
             }
         }
 
-        return response()->json($project->load('client', 'assignmentLead.user', 'assignmentManager.user'), 201);
+        // Update proposal status to converted
+        $proposal->update(['status' => 'converted']);
+
+        return response()->json($project->load(['client', 'assignmentLead.user', 'assignmentManager.user', 'proposal']), 201);
     }
 
     public function show(Project $project)
     {
         return response()->json(
-            $project->load('client', 'assignmentLead.user', 'assignmentManager.user', 'members')
+            $project->load(['client', 'assignmentLead.user', 'assignmentManager.user', 'proposal', 'members.user'])
         );
     }
 
@@ -83,155 +86,111 @@ class ProjectController extends Controller
     {
         $data = $request->validate([
             'project_code' => 'sometimes|string|unique:projects,project_code,' . $project->id,
+            'proposal_id' => 'sometimes|exists:proposals,id',
+            'client_id' => 'sometimes|exists:clients,id',
             'title' => 'sometimes|string|max:255',
             'assignment_type' => 'sometimes|in:m&e,transaction,advisory,investment,training,research,internal,consulting',
-            'assignment_lead_id' => 'nullable|exists:staff,id', // Changed to staff
-            'assignment_manager_id' => 'nullable|exists:staff,id', // Changed to staff
-            'client_relationship_partner_id' => 'nullable|exists:staff,id', // Changed to staff
-            'budget_hours' => 'nullable|numeric',
-            'budget_cost' => 'nullable|numeric',
+            'assignment_lead_id' => 'nullable|exists:staff,id',
+            'assignment_manager_id' => 'nullable|exists:staff,id',
+            'client_relationship_partner_id' => 'nullable|exists:staff,id',
+            'project_value' => 'nullable|numeric|min:0',
             'planned_start' => 'nullable|date',
             'planned_end' => 'nullable|date|after_or_equal:planned_start',
             'actual_start' => 'nullable|date',
             'actual_end' => 'nullable|date',
             'status' => 'sometimes|in:planned,active,on_hold,completed,cancelled',
-            'staff_assignments' => 'nullable|array',
-            'staff_assignments.*.staff_id' => 'required|exists:staff,id',
-            'staff_assignments.*.hours' => 'nullable|numeric',
-            'staff_assignments.*.cost_per_hour' => 'nullable|numeric',
         ]);
 
-        // Remove staff_assignments from project data
-        $staffAssignments = $data['staff_assignments'] ?? [];
-        unset($data['staff_assignments']);
-
-        // Update project
         $project->update($data);
 
-        // Update staff assignments in project_team table
-        if (isset($request->staff_assignments)) {
-            // Get current team members
-            $currentTeamIds = $project->team()->pluck('staff_id')->toArray();
-            $newTeamIds = [];
-
-            foreach ($staffAssignments as $assignment) {
-                if (empty($assignment['staff_id'])) continue;
-
-                $newTeamIds[] = $assignment['staff_id'];
-
-                // Update or create
-                ProjectTeam::updateOrCreate(
-                    [
-                        'project_id' => $project->id,
-                        'staff_id' => $assignment['staff_id'],
-                    ],
-                    [
-                        'role' => 'consultant', // Default role
-                        'planned_hours' => $assignment['hours'] ?? 0,
-                        'billable_rate' => $assignment['cost_per_hour'] ?? 0,
-                    ]
-                );
-            }
-
-            // Remove team members that are no longer assigned
-            $toRemove = array_diff($currentTeamIds, $newTeamIds);
-            if (!empty($toRemove)) {
-                $project->team()->whereIn('staff_id', $toRemove)->delete();
-            }
-        }
-
-        return response()->json($project->load('client', 'assignmentLead.user', 'assignmentManager.user'));
+        return response()->json($project->load(['client', 'assignmentLead.user', 'assignmentManager.user', 'proposal']));
     }
 
     public function destroy(Project $project)
     {
+        // Check if project has any time entries
+        if ($project->timeEntries()->count() > 0) {
+            return response()->json([
+                'message' => 'Cannot delete project as it has time entries associated with it.'
+            ], 422);
+        }
+
         // Delete team members first
         $project->team()->delete();
+        
+        // Delete related data (stages, tasks, meetings, documents)
+        $project->stages()->delete();
+        $project->tasks()->delete();
+        $project->meetings()->delete();
+        $project->documents()->delete();
+        
+        // Delete the project
         $project->delete();
 
-        return response()->json(['message' => 'Project deleted.']);
+        return response()->json(['message' => 'Project deleted successfully.']);
     }
 
-    // --- Team assignment ---
-
-    // public function addTeamMember(Request $request, Project $project)
-    // {
-    //     $data = $request->validate([
-    //         'user_id' => 'required|exists:users,id',
-    //         'role' => 'required|in:lead,am,consultant,reviewer',
-    //         'planned_hours' => 'nullable|numeric',
-    //         'billable_rate' => 'nullable|numeric',
-    //     ]);
-
-    //     $member = $project->team()->updateOrCreate(
-    //         ['user_id' => $data['user_id']],
-    //         $data
-    //     );
-
-    //     return response()->json($member, 201);
-    // }
-
-    // public function removeTeamMember(Project $project, int $userId)
-    // {
-    //     $project->team()->where('user_id', $userId)->delete();
-
-    //     return response()->json(['message' => 'Removed from project team.']);
-    // }
-
     /**
-     * Generate a unique project code
-     * Format: PRJ-YYYY-XXXXX (e.g., PRJ-2026-00001)
+     * Generate a unique project code from proposal
+     * Format: PRJ-{proposal_code}-{sequence}
+     * Example: PRJ-P-CLT202600001-WRP-001-001
      */
-    private function generateProjectCode(int $clientId): string
+    private function generateProjectCodeFromProposal(int $proposalId): string
     {
+        $proposal = Proposal::findOrFail($proposalId);
         $prefix = 'PRJ';
-        $year = date('Y');
+        $proposalCode = $proposal->proposal_code ?? 'P';
         
-        // Get the last project code for this year
-        $lastProject = Project::where('project_code', 'like', "{$prefix}-{$year}-%")
+        // Escape special characters for LIKE query
+        $likePattern = $prefix . '-' . $proposalCode . '-%';
+        $likePattern = addcslashes($likePattern, '%_');
+
+        // Get the last project code for this proposal
+        $lastProject = Project::where('project_code', 'like', $likePattern)
             ->orderBy('project_code', 'desc')
             ->first();
-        
+
         if ($lastProject) {
             // Extract the sequence number from the last code
             $parts = explode('-', $lastProject->project_code);
             $lastSequence = intval(end($parts));
-            $sequence = str_pad($lastSequence + 1, 5, '0', STR_PAD_LEFT);
+            $sequence = str_pad($lastSequence + 1, 3, '0', STR_PAD_LEFT);
         } else {
-            $sequence = '00001';
+            $sequence = '001';
         }
-        
-        $code = "{$prefix}-{$year}-{$sequence}";
-        
+
+        $code = "{$prefix}-{$proposalCode}-{$sequence}";
+
         // Ensure uniqueness (just in case)
         while (Project::where('project_code', $code)->exists()) {
-            $sequence = str_pad(intval($sequence) + 1, 5, '0', STR_PAD_LEFT);
-            $code = "{$prefix}-{$year}-{$sequence}";
+            $sequence = str_pad(intval($sequence) + 1, 3, '0', STR_PAD_LEFT);
+            $code = "{$prefix}-{$proposalCode}-{$sequence}";
         }
-        
+
         return $code;
     }
 
     /**
-     * Endpoint to preview a generated project code
+     * Endpoint to preview a generated project code from proposal
      */
-    public function previewCode(Request $request)
+    public function previewCodeFromProposal(Request $request)
     {
         $request->validate([
-            'client_id' => 'required|exists:clients,id',
+            'proposal_id' => 'required|exists:proposals,id',
         ]);
 
-        $code = $this->generateProjectCode($request->client_id);
+        $code = $this->generateProjectCodeFromProposal($request->proposal_id);
         
         return response()->json(['project_code' => $code]);
     }
 
-
-     public function getTeamMembers(Project $project)
+    /**
+     * Get team members for a project
+     */
+    public function getTeamMembers(Project $project)
     {
         $teamMembers = $project->team()->with('staff.user', 'staff.gradeLevel')->get();
         
-        // Transform to include staff details
         $members = $teamMembers->map(function ($member) {
             return [
                 'id' => $member->id,
@@ -267,14 +226,18 @@ class ProjectController extends Controller
         $data = $request->validate([
             'staff_id' => 'required|exists:staff,id',
             'role' => 'required|in:lead,am,consultant,reviewer',
-            'planned_hours' => 'nullable|numeric',
-            'billable_rate' => 'nullable|numeric',
+            'planned_hours' => 'nullable|numeric|min:0',
+            'billable_rate' => 'nullable|numeric|min:0',
         ]);
 
-        $member = $project->team()->updateOrCreate(
-            ['staff_id' => $data['staff_id']],
-            $data
-        );
+        // Check if staff already assigned
+        if ($project->team()->where('staff_id', $data['staff_id'])->exists()) {
+            return response()->json([
+                'message' => 'This staff member is already assigned to the project.'
+            ], 422);
+        }
+
+        $member = $project->team()->create($data);
 
         return response()->json($member, 201);
     }
@@ -289,40 +252,56 @@ class ProjectController extends Controller
         return response()->json(['message' => 'Removed from project team.']);
     }
 
-
+    /**
+     * Update team member
+     */
     public function updateTeamMember(Request $request, Project $project, int $staffId)
-{
-    $data = $request->validate([
-        'role' => 'sometimes|in:lead,am,consultant,reviewer',
-        'planned_hours' => 'nullable|numeric',
-        'billable_rate' => 'nullable|numeric',
-    ]);
+    {
+        $data = $request->validate([
+            'role' => 'sometimes|in:lead,am,consultant,reviewer',
+            'planned_hours' => 'nullable|numeric|min:0',
+            'billable_rate' => 'nullable|numeric|min:0',
+        ]);
 
-    $member = $project->team()->where('staff_id', $staffId)->firstOrFail();
-    $member->update($data);
+        $member = $project->team()->where('staff_id', $staffId)->firstOrFail();
+        $member->update($data);
 
-    return response()->json($member);
-}
-
-
-public function getAssignedProjects(Request $request)
-{
-    $user = $request->user();
-    $staff = \App\Models\Staff::where('user_id', $user->id)->first();
-    
-    if (!$staff) {
-        return response()->json([]);
+        return response()->json($member);
     }
-    
-    // Get projects where this staff is a team member
-    $projects = Project::whereHas('team', function($q) use ($staff) {
-        $q->where('staff_id', $staff->id);
-    })
-    ->with(['client', 'assignmentLead.user', 'assignmentManager.user'])
-    ->orderBy('title')
-    ->get();
-    
-    return response()->json($projects);
-}
 
+    /**
+     * Get projects assigned to the authenticated user
+     */
+    public function getAssignedProjects(Request $request)
+    {
+        $user = $request->user();
+        $staff = \App\Models\Staff::where('user_id', $user->id)->first();
+        
+        if (!$staff) {
+            return response()->json([]);
+        }
+        
+        $projects = Project::whereHas('team', function($q) use ($staff) {
+            $q->where('staff_id', $staff->id);
+        })
+        ->with(['client', 'assignmentLead.user', 'assignmentManager.user', 'proposal'])
+        ->orderBy('title')
+        ->get();
+        
+        return response()->json($projects);
+    }
+
+    /**
+     * Get projects by client
+     */
+    public function getByClient(Request $request, $clientId)
+    {
+        $projects = Project::with(['client', 'assignmentLead.user', 'assignmentManager.user', 'proposal'])
+            ->where('client_id', $clientId)
+            ->when($request->status, fn ($q) => $q->where('status', $request->status))
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($projects);
+    }
 }

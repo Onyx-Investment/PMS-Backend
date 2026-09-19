@@ -8,12 +8,20 @@ use Illuminate\Database\Eloquent\Model;
 class Lead extends Model
 {
     protected $fillable = [
-        'client_id', 'title', 'description', 'source',
-        'estimated_value', 'probability', 'status', 'owner_id',
+        'lead_code',
+        'client_id', 
+        'title', 
+        'description', 
+        'source',
+        'estimated_value', 
+        'probability', 
+        'status', 
+        'owner_id',
     ];
 
     protected $casts = [
         'estimated_value' => 'decimal:2',
+        'probability' => 'integer',
     ];
 
     public function client()
@@ -34,5 +42,12 @@ class Lead extends Model
     public function proposals()
     {
         return $this->hasMany(Proposal::class);
+    }
+
+    // Scope for searching by lead code
+    public function scopeSearch($query, $search)
+    {
+        return $query->where('lead_code', 'like', "%{$search}%")
+            ->orWhere('title', 'like', "%{$search}%");
     }
 }

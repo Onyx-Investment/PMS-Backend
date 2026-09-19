@@ -8,10 +8,22 @@ use Illuminate\Database\Eloquent\Model;
 class Project extends Model
 {
     protected $fillable = [
-        'project_code', 'proposal_id', 'client_id', 'title', 'assignment_type',
-        'assignment_lead_id', 'assignment_manager_id',
-        'client_relationship_partner_id', 'budget_hours', 'budget_cost',
-        'planned_start', 'planned_end', 'actual_start', 'actual_end', 'status',
+        'project_code', 
+        'proposal_id', 
+        'client_id', 
+        'title', 
+        'assignment_type',
+        'assignment_lead_id', 
+        'assignment_manager_id',
+        'client_relationship_partner_id', 
+        'project_value',
+        'budget_hours', 
+        'budget_cost',
+        'planned_start', 
+        'planned_end', 
+        'actual_start', 
+        'actual_end', 
+        'status',
     ];
 
     protected $casts = [
@@ -21,6 +33,7 @@ class Project extends Model
         'actual_end' => 'date',
         'budget_hours' => 'decimal:2',
         'budget_cost' => 'decimal:2',
+        'project_value' => 'decimal:2',
     ];
 
     public function client()
@@ -28,19 +41,21 @@ class Project extends Model
         return $this->belongsTo(Client::class);
     }
 
-    // ✅ Change to Staff
+    public function proposal()
+    {
+        return $this->belongsTo(Proposal::class);
+    }
+
     public function assignmentLead()
     {
         return $this->belongsTo(Staff::class, 'assignment_lead_id');
     }
 
-    // ✅ Change to Staff
     public function assignmentManager()
     {
         return $this->belongsTo(Staff::class, 'assignment_manager_id');
     }
 
-    // ✅ Change to Staff
     public function clientRelationshipPartner()
     {
         return $this->belongsTo(Staff::class, 'client_relationship_partner_id');
@@ -51,7 +66,6 @@ class Project extends Model
         return $this->hasMany(ProjectTeam::class);
     }
 
-    // ✅ Change to Staff
     public function members()
     {
         return $this->belongsToMany(Staff::class, 'project_team', 'project_id', 'staff_id')
@@ -104,12 +118,5 @@ class Project extends Model
             ->where('billable', true)
             ->where('approved', true)
             ->sum('hours');
-    }
-
-    // --- Phase 4 ---
-
-    public function proposal()
-    {
-        return $this->belongsTo(Proposal::class);
     }
 }

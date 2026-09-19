@@ -22,7 +22,7 @@ class ClientController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'client_code' => 'required|string|unique:clients,client_code',
+            'client_code' => 'nullable|string|unique:clients,client_code',
             'name' => 'required|string|max:255',
             'sector' => 'nullable|string',
             'address' => 'nullable|string',
@@ -31,6 +31,11 @@ class ClientController extends Controller
             'phone' => 'nullable|string',
             'status' => 'nullable|in:prospect,active,inactive',
         ]);
+
+        // Auto-generate code if not provided
+        if (empty($data['client_code'])) {
+            $data['client_code'] = $this->generateClientCode();
+        }
 
         $client = Client::create($data);
 
@@ -65,6 +70,49 @@ class ClientController extends Controller
         $client->delete();
 
         return response()->json(['message' => 'Client deleted.']);
+    }
+
+    /**
+     * Generate a unique client code
+     * Format: CLT-YYYY-XXXXX (e.g., CLT-2026-00001)
+     */
+    private function generateClientCode(): string
+    {
+        $prefix = 'CL';
+        $year = date('Y');
+        
+        // Get the last client code for this year
+        $lastClient = Client::where('client_code', 'like', "{$prefix}-{$year}-%")
+            ->orderBy('client_code', 'desc')
+            ->first();
+        
+        if ($lastClient) {
+            // Extract the sequence number from the last code
+            $parts = explode('-', $lastClient->client_code);
+            $lastSequence = intval(end($parts));
+            $sequence = str_pad($lastSequence + 1, 5, '0', STR_PAD_LEFT);
+        } else {
+            $sequence = '00001';
+        }
+        
+        $code = "{$prefix}-{$year}-{$sequence}";
+        
+        // Ensure uniqueness (just in case)
+        while (Client::where('client_code', $code)->exists()) {
+            $sequence = str_pad(intval($sequence) + 1, 5, '0', STR_PAD_LEFT);
+            $code = "{$prefix}-{$year}-{$sequence}";
+        }
+        
+        return $code;
+    }
+
+    /**
+     * Endpoint to preview a generated client code
+     */
+    public function previewCode(Request $request)
+    {
+        $code = $this->generateClientCode();
+        return response()->json(['client_code' => $code]);
     }
 
     // Contact management methods

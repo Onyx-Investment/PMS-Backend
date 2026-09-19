@@ -8,8 +8,15 @@ use Illuminate\Database\Eloquent\Model;
 class Proposal extends Model
 {
     protected $fillable = [
-        'lead_id', 'proposal_no', 'version', 'submission_date', 'status',
-        'prepared_by', 'reviewed_by', 'review_notes',
+        'proposal_code',
+        'lead_id', 
+        'title',
+        'proposal_no',
+        'submission_date',
+        'status',
+        'prepared_by',
+        'reviewed_by',
+        'review_notes',
     ];
 
     protected $casts = [
@@ -31,8 +38,16 @@ class Proposal extends Model
         return $this->belongsTo(User::class, 'reviewed_by');
     }
 
-    public function project()
+    public function documents()
     {
-        return $this->hasOne(Project::class);
+        return $this->hasMany(ProposalDocument::class);
+    }
+
+    // Scope for searching
+    public function scopeSearch($query, $search)
+    {
+        return $query->where('proposal_code', 'like', "%{$search}%")
+            ->orWhere('title', 'like', "%{$search}%")
+            ->orWhere('proposal_no', 'like', "%{$search}%");
     }
 }

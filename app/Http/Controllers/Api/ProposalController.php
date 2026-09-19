@@ -7,14 +7,15 @@ use App\Http\Controllers\Controller;
 use App\Models\Lead;
 use App\Models\Project;
 use App\Models\Proposal;
-use App\Enums\LeadStatus;
+use App\Models\ProposalDocument;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProposalController extends Controller
 {
     public function index(Request $request)
     {
-        $proposals = Proposal::with('lead.client', 'preparedBy', 'reviewedBy')
+        $proposals = Proposal::with(['lead.client', 'preparedBy', 'reviewedBy', 'documents'])
             ->when($request->lead_id, fn ($q) => $q->where('lead_id', $request->lead_id))
             ->when($request->status, fn ($q) => $q->where('status', $request->status))
             ->orderByDesc('created_at')
@@ -27,13 +28,22 @@ class ProposalController extends Controller
     {
         $data = $request->validate([
             'lead_id' => 'required|exists:leads,id',
-            'proposal_no' => 'required|string',
+            'title' => 'required|string|max:255',
+            'proposal_no' => 'nullable|string',
             'submission_date' => 'nullable|date',
         ]);
 
         // Get the lead
-        $lead = Lead::find($data['lead_id']);
+        $lead = Lead::with('client')->find($data['lead_id']);
         
+        // Generate proposal code
+        $data['proposal_code'] = $this->generateProposalCode($lead);
+        
+        // Auto-generate proposal number if not provided
+        if (empty($data['proposal_no'])) {
+            $data['proposal_no'] = 'PRO-' . date('Y') . '-' . str_pad(rand(1, 99999), 5, '0', STR_PAD_LEFT);
+        }
+
         // Update lead status to proposal if it's not already further along
         if (in_array($lead->status, ['qualified', 'prospect'])) {
             $lead->update(['status' => 'proposal']);
@@ -41,30 +51,30 @@ class ProposalController extends Controller
 
         $proposal = Proposal::create([
             ...$data,
-            'version' => 1,
             'status' => 'draft',
             'prepared_by' => $request->user()->id,
         ]);
 
-        return response()->json($proposal, 201);
+        return response()->json($proposal->load(['lead.client', 'preparedBy', 'documents']), 201);
     }
 
     public function show(Proposal $proposal)
     {
-        return response()->json($proposal->load('lead.client', 'preparedBy', 'reviewedBy'));
+        return response()->json($proposal->load(['lead.client', 'preparedBy', 'reviewedBy', 'documents.uploadedBy']));
     }
 
     public function update(Request $request, Proposal $proposal)
     {
         $data = $request->validate([
-            'status' => 'sometimes|in:draft,submitted,approved,rejected,converted',
+            'status' => 'sometimes|in:draft,submitted,reviewed,approved,converted,lost',
+            'title' => 'sometimes|string|max:255',
             'proposal_no' => 'sometimes|string',
             'submission_date' => 'nullable|date',
         ]);
 
         $proposal->update($data);
 
-        return response()->json($proposal->load('lead.client', 'preparedBy', 'reviewedBy'));
+        return response()->json($proposal->load(['lead.client', 'preparedBy', 'reviewedBy', 'documents']));
     }
 
     public function submit(Request $request, Proposal $proposal)
@@ -87,7 +97,7 @@ class ProposalController extends Controller
     public function review(Request $request, Proposal $proposal)
     {
         $data = $request->validate([
-            'decision' => 'required|in:approved,rejected',
+            'decision' => 'required|in:approved,rejected,lost',
             'review_notes' => 'nullable|string',
         ]);
 
@@ -105,24 +115,6 @@ class ProposalController extends Controller
         }
 
         return response()->json($proposal);
-    }
-
-    public function newVersion(Request $request, Proposal $proposal)
-    {
-        abort_if($proposal->status !== 'rejected', 422, 'Only a rejected proposal can get a new version.');
-
-        $next = Proposal::create([
-            'lead_id' => $proposal->lead_id,
-            'proposal_no' => $proposal->proposal_no,
-            'version' => $proposal->version + 1,
-            'status' => 'draft',
-            'prepared_by' => $request->user()->id,
-        ]);
-
-        // Move lead back to proposal
-        $proposal->lead->update(['status' => 'proposal']);
-
-        return response()->json($next, 201);
     }
 
     public function convertToProject(Request $request, Proposal $proposal)
@@ -169,22 +161,60 @@ class ProposalController extends Controller
         return response()->json($project, 201);
     }
 
+    public function destroy(Proposal $proposal)
+    {
+        $proposal->delete();
+        return response()->json(['message' => 'Proposal deleted.']);
+    }
+
+    /**
+     * Generate a unique proposal code
+     * Format: P-{lead_code}-{sequence}
+     * Example: P-L-CLT202600001-WRP-001
+     */
+    private function generateProposalCode(Lead $lead): string
+    {
+        $prefix = 'PP';
+        $leadCode = $lead->lead_code ?? 'LD';
+        
+        // Get the last proposal code for this lead
+        $lastProposal = Proposal::where('proposal_code', 'like', "{$prefix}-{$leadCode}-%")
+            ->orderBy('proposal_code', 'desc')
+            ->first();
+
+        if ($lastProposal) {
+            // Extract the sequence number from the last code
+            $parts = explode('-', $lastProposal->proposal_code);
+            $lastSequence = intval(end($parts));
+            $sequence = str_pad($lastSequence + 1, 3, '0', STR_PAD_LEFT);
+        } else {
+            $sequence = '001';
+        }
+
+        $code = "{$prefix}-{$leadCode}-{$sequence}";
+
+        // Ensure uniqueness (just in case)
+        while (Proposal::where('proposal_code', $code)->exists()) {
+            $sequence = str_pad(intval($sequence) + 1, 3, '0', STR_PAD_LEFT);
+            $code = "{$prefix}-{$leadCode}-{$sequence}";
+        }
+
+        return $code;
+    }
+
     /**
      * Generate a unique project code
-     * Format: PRJ-YYYY-XXXXX (e.g., PRJ-2026-00001)
      */
     private function generateProjectCode(int $clientId): string
     {
         $prefix = 'PRJ';
         $year = date('Y');
         
-        // Get the last project code for this year
         $lastProject = Project::where('project_code', 'like', "{$prefix}-{$year}-%")
             ->orderBy('project_code', 'desc')
             ->first();
         
         if ($lastProject) {
-            // Extract the sequence number from the last code
             $parts = explode('-', $lastProject->project_code);
             $lastSequence = intval(end($parts));
             $sequence = str_pad($lastSequence + 1, 5, '0', STR_PAD_LEFT);
@@ -194,7 +224,6 @@ class ProposalController extends Controller
         
         $code = "{$prefix}-{$year}-{$sequence}";
         
-        // Ensure uniqueness (just in case)
         while (Project::where('project_code', $code)->exists()) {
             $sequence = str_pad(intval($sequence) + 1, 5, '0', STR_PAD_LEFT);
             $code = "{$prefix}-{$year}-{$sequence}";
@@ -203,9 +232,78 @@ class ProposalController extends Controller
         return $code;
     }
 
-    public function destroy(Proposal $proposal)
+    /**
+     * Get proposal code preview
+     */
+    public function previewCode(Request $request)
     {
-        $proposal->delete();
-        return response()->json(['message' => 'Proposal deleted.']);
+        $request->validate([
+            'lead_id' => 'required|exists:leads,id',
+        ]);
+
+        $lead = Lead::find($request->lead_id);
+        $code = $this->generateProposalCode($lead);
+
+        return response()->json(['proposal_code' => $code]);
+    }
+
+    /**
+     * Upload document for proposal
+     */
+    public function uploadDocument(Request $request, Proposal $proposal)
+    {
+        $data = $request->validate([
+            'document' => 'required|file|max:20480', // 20MB max
+            'description' => 'nullable|string',
+        ]);
+
+        $file = $request->file('document');
+        $path = $file->store('proposals/' . $proposal->id, 'public');
+
+        $document = ProposalDocument::create([
+            'proposal_id' => $proposal->id,
+            'document_name' => $file->getClientOriginalName(),
+            'file_path' => $path,
+            'file_size' => $file->getSize(),
+            'mime_type' => $file->getMimeType(),
+            'uploaded_by' => $request->user()->id,
+            'description' => $data['description'] ?? null,
+        ]);
+
+        return response()->json($document->load('uploadedBy'), 201);
+    }
+
+    /**
+     * Delete document
+     */
+    public function deleteDocument(Proposal $proposal, $documentId)
+    {
+        $document = ProposalDocument::where('proposal_id', $proposal->id)
+            ->findOrFail($documentId);
+
+        // Delete file from storage
+        Storage::disk('public')->delete($document->file_path);
+
+        $document->delete();
+
+        return response()->json(['message' => 'Document deleted successfully.']);
+    }
+
+    /**
+     * Download document
+     */
+    public function downloadDocument(Proposal $proposal, $documentId)
+    {
+        $document = ProposalDocument::where('proposal_id', $proposal->id)
+            ->findOrFail($documentId);
+
+        if (!Storage::disk('public')->exists($document->file_path)) {
+            return response()->json(['message' => 'File not found.'], 404);
+        }
+
+        return Storage::disk('public')->download(
+            $document->file_path,
+            $document->document_name
+        );
     }
 }

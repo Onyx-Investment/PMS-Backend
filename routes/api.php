@@ -45,7 +45,22 @@ Route::middleware('auth:api')->group(function () {
     Route::apiResource('staff-types', StaffTypeController::class);
     Route::get('/staff-types/active/list', [StaffTypeController::class, 'getActiveTypes']);
 
-    // Departments
+// Department Routes
+Route::prefix('departments')->group(function () {
+    Route::get('/', [DepartmentController::class, 'index']);
+    Route::post('/', [DepartmentController::class, 'store']);
+    Route::get('/{department}', [DepartmentController::class, 'show']);
+    Route::put('/{department}', [DepartmentController::class, 'update']);
+    Route::delete('/{department}', [DepartmentController::class, 'destroy']);
+    
+    // Staff management
+    Route::post('/{department}/staff', [DepartmentController::class, 'addStaff']);
+    Route::delete('/{department}/staff/{staffId}', [DepartmentController::class, 'removeStaff']);
+    
+    // Parent/Sub-department management
+    Route::post('/{department}/parents', [DepartmentController::class, 'addParents']);
+    Route::delete('/{department}/parent/{parentId}', [DepartmentController::class, 'removeParent']);
+});
     Route::apiResource('departments', DepartmentController::class);
     
     // Roles
@@ -94,33 +109,49 @@ Route::prefix('internal-tasks')->group(function () {
     Route::put('/users/{user}', [UserController::class, 'update']);
 
     // Clients and their contacts
-    Route::apiResource('clients', ClientController::class);
     Route::get('/clients/{client}/contacts', [ClientController::class, 'contacts']);
     Route::post('/clients/{client}/contacts', [ClientController::class, 'storeContact']);
     Route::put('/clients/{client}/contacts', [ClientController::class, 'updateContacts']);
     Route::put('/clients/{client}/contacts/{contact}', [ClientController::class, 'updateContact']);
     Route::delete('/clients/{client}/contacts/{contact}', [ClientController::class, 'deleteContact']);
+    Route::get('/clients/preview-code', [ClientController::class, 'previewCode']);
+    Route::apiResource('clients', ClientController::class);
 
+       Route::get('/projects/preview-code-from-proposal', [ProjectController::class, 'previewCodeFromProposal']);
+    Route::get('/projects/assigned-to-me', [ProjectController::class, 'getAssignedProjects']);
+    // --- Documents ---
+    Route::get('/projects/{project}/documents', [DocumentController::class, 'index']);
+    Route::post('/projects/{project}/documents', [DocumentController::class, 'store']);
+    Route::post('/projects/{project}/documents/{document}/approve', [DocumentController::class, 'approve']);
+    Route::delete('/projects/{project}/documents/{document}', [DocumentController::class, 'destroy']);
+
+
+// Project team management
+Route::get('/projects/{project}/team', [ProjectController::class, 'getTeamMembers']);
+Route::post('/projects/{project}/team', [ProjectController::class, 'addTeamMember']);
+Route::put('/projects/{project}/team/{staffId}', [ProjectController::class, 'updateTeamMember']);
+Route::delete('/projects/{project}/team/{staffId}', [ProjectController::class, 'removeTeamMember']);
+Route::get('/projects/by-client/{clientId}', [ProjectController::class, 'getByClient']);
     // Projects - CUSTOM ROUTES MUST COME BEFORE apiResource
     Route::get('/projects/assigned-to-me', [ProjectController::class, 'getAssignedProjects']);
     Route::get('/projects/preview-code', [ProjectController::class, 'previewCode']);
     Route::get('/projects/{project}/team', [ProjectController::class, 'getTeamMembers']);
     Route::post('/projects/{project}/team', [ProjectController::class, 'addTeamMember']);
     Route::delete('/projects/{project}/team/{staffId}', [ProjectController::class, 'removeTeamMember']);
-    Route::apiResource('projects', ProjectController::class);
-
+    
     // --- Stages (nested under a project) ---
     Route::get('/projects/{project}/stages', [ProjectStageController::class, 'index']);
     Route::post('/projects/{project}/stages', [ProjectStageController::class, 'store']);
     Route::put('/projects/{project}/stages/{stage}', [ProjectStageController::class, 'update']);
     Route::delete('/projects/{project}/stages/{stage}', [ProjectStageController::class, 'destroy']);
-
+    
     // --- Tasks (nested under a project) ---
     Route::get('/projects/{project}/tasks', [TaskController::class, 'index']);
     Route::post('/projects/{project}/tasks', [TaskController::class, 'store']);
     Route::get('/projects/{project}/tasks/{task}', [TaskController::class, 'show']);
     Route::put('/projects/{project}/tasks/{task}', [TaskController::class, 'update']);
     Route::delete('/projects/{project}/tasks/{task}', [TaskController::class, 'destroy']);
+    Route::apiResource('projects', ProjectController::class);
 
     // --- Meetings ---
     Route::apiResource('meetings', MeetingController::class);
@@ -137,12 +168,7 @@ Route::prefix('internal-tasks')->group(function () {
     Route::put('/meetings/{meeting}/action-items/{actionItem}', [ActionItemController::class, 'update']);
     Route::delete('/meetings/{meeting}/action-items/{actionItem}', [ActionItemController::class, 'destroy']);
 
-    // --- Documents ---
-    Route::get('/projects/{project}/documents', [DocumentController::class, 'index']);
-    Route::post('/projects/{project}/documents', [DocumentController::class, 'store']);
-    Route::post('/projects/{project}/documents/{document}/approve', [DocumentController::class, 'approve']);
-    Route::delete('/projects/{project}/documents/{document}', [DocumentController::class, 'destroy']);
-
+ 
     // --- Time codes ---
     // Route::get('/time-codes', [TimeCodeController::class, 'index']);
     // Route::post('/time-codes', [TimeCodeController::class, 'store'])->middleware('role:admin,finance');
@@ -162,6 +188,7 @@ Route::prefix('time-codes')->group(function () {
 
 // Time entries for staff/project
 Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries']);
+
 
     // --- Timesheets ---
     // routes/api.php
@@ -203,6 +230,7 @@ Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries
     Route::post('/weekly-reports/{weeklyReport}/review', [WeeklyReportController::class, 'review']);
 
     // --- Leads ---
+    Route::get('/leads/preview-code', [LeadController::class, 'previewCode']);
     Route::apiResource('leads', LeadController::class);
 
     // --- Call reports ---
@@ -214,6 +242,7 @@ Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries
     Route::post('/call-reports/share', [CallReportController::class, 'share']);
 
     // --- Proposals - All users can view, create, and submit ---
+    Route::get('/proposals/preview-code', [ProposalController::class, 'previewCode']);
     Route::get('/proposals', [ProposalController::class, 'index']);
     Route::post('/proposals', [ProposalController::class, 'store']);
     Route::get('/proposals/{proposal}', [ProposalController::class, 'show']);
@@ -229,6 +258,12 @@ Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries
         ->middleware('role:assignment_manager,assignment_lead,md,coo,ceo,admin');
     Route::delete('/proposals/{proposal}', [ProposalController::class, 'destroy'])
         ->middleware('role:admin,assignment_manager');
+
+    // Document upload endpoints
+Route::post('/proposals/{proposal}/documents', [ProposalController::class, 'uploadDocument']);
+Route::delete('/proposals/{proposal}/documents/{documentId}', [ProposalController::class, 'deleteDocument']);
+Route::get('/proposals/{proposal}/documents/{documentId}/download', [ProposalController::class, 'downloadDocument']);
+
 
     // --- Utilisation ---
     Route::get('/utilisation', [UtilisationController::class, 'index']);

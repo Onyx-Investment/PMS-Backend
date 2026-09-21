@@ -15,6 +15,7 @@
         "php-open-source-saver/jwt-auth": "^2.9",
         "phpoffice/phpspreadsheet": "^5.7",
         "simplesoftwareio/simple-qrcode": "^4.2",
+        "spatie/laravel-tail": "^4.6",
         "symfony/brevo-mailer": "^7.4"
     },
     "require-dev": {

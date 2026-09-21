@@ -75,279 +75,198 @@ class AuthController extends Controller
         ], 201);
     }
 
-    public function login(Request $request)
-    {
-        // Log the request for debugging
-        \Log::info('Login attempt', [
-            'email' => $request->email,
-            'has_otp' => !empty($request->otp),
-            'has_password' => !empty($request->password),
-            'otp' => $request->otp
-        ]);
-
-        $request->validate([
-            'email' => 'required|email',
-            'password' => 'nullable|string',
-            'otp' => 'nullable|string|size:6',
-        ]);
-
-        // Find the user
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user) {
-            \Log::warning('User not found', ['email' => $request->email]);
-            return response()->json(['message' => 'Invalid credentials.'], 401);
-        }
-
-        // Check if user is active
-        if (!$user->is_active) {
-            \Log::warning('User account inactive', ['email' => $request->email]);
-            return response()->json(['message' => 'Account is deactivated.'], 403);
-        }
-
-        // --- OTP LOGIN ---
-        if ($request->filled('otp')) {
-    \Log::info('OTP login attempt', [
-        'email' => $request->email,
-        'provided_otp' => $request->otp,
-        'stored_otp' => $user->otp,
-        'otp_expires_at' => $user->otp_expires_at
+public function verifyOtp(Request $request)
+{
+    $data = $request->validate([
+        'email' => 'required|email',
+        'otp'   => 'required|string|size:6',
     ]);
 
-    if (!$user->verifyOTP($request->otp)) {
-        \Log::warning('Invalid OTP', [
-            'email' => $request->email,
-        ]);
+    $user = User::where('email', $data['email'])->first();
 
+    if (!$user || !$user->is_active) {
         return response()->json([
-            'message' => 'Invalid or expired OTP.'
-        ], 401);
+            'message' => 'Invalid email.',
+        ], 404);
     }
 
-    // OTP has served its purpose.
-    // Clear it now.
+    if (!$user->verifyOTP($data['otp'])) {
+        return response()->json([
+            'message' => 'Invalid or expired OTP.',
+        ], 422);
+    }
+
+    // Make sure this is actually a first-time setup account.
+    if (!$user->must_change_password || !empty($user->password)) {
+        return response()->json([
+            'message' => 'This account has already been set up. Please use normal login or change-password.',
+        ], 403);
+    }
+
+    // Issue temporary setup token.
+    $setupToken = auth('api')
+        ->setTTL(30)
+        ->login($user);
+
+    // OTP can no longer be reused.
     $user->clearOTP();
 
-    $token = JWTAuth::fromUser($user);
-
-    if ($user->must_change_password || empty($user->password)) {
-
-        return response()->json([
-            'access_token' => $token,
-            'token_type' => 'bearer',
-            'expires_in' => config('jwt.ttl') * 60,
-            'must_change_password' => true,
-            'user' => $user->load(
-                'staff.role',
-                'staff.department',
-                'staff.gradeLevel'
-            ),
-        ]);
-    }
-
     return response()->json([
-        'access_token' => $token,
-        'token_type' => 'bearer',
-        'expires_in' => config('jwt.ttl') * 60,
-        'must_change_password' => false,
-        'user' => $user->load(
-            'staff.role',
-            'staff.department',
-            'staff.gradeLevel'
-        ),
+        'message' => 'OTP verified.',
+        'setup_token' => $setupToken,
+        'email' => $user->email,
     ]);
 }
 
-        // --- PASSWORD LOGIN ---
-        if (!$request->password) {
-            return response()->json(['message' => 'Password is required.'], 422);
-        }
-
-        // Check if user must change password (no password set yet)
-        if ($user->must_change_password && empty($user->password)) {
-            // Generate new OTP and send it
-            $otp = $user->generateOTP();
-            
-            \Log::info('Sending OTP for first-time login', [
-                'email' => $request->email,
-                'otp' => $otp
-            ]);
-            
-            try {
-                Mail::to($user->email)->send(new OTPMail($user, $otp, false));
-            } catch (\Exception $e) {
-                \Log::error('Failed to send OTP email: ' . $e->getMessage());
-            }
-            
-            return response()->json([
-                'message' => 'Please use OTP to login and set your password. An OTP has been sent to your email.',
-                'use_otp' => true,
-                'email' => $user->email,
-            ], 422);
-        }
-
-        // Attempt login with password
-        $credentials = $request->only('email', 'password');
-
-        try {
-            $token = JWTAuth::attempt($credentials);
-
-            if (!$token) {
-                return response()->json([
-                    'message' => 'Invalid credentials.'
-                ], 401);
-            }
-
-            $user = JWTAuth::setToken($token)->toUser();
-
-            if (!$user) {
-                JWTAuth::invalidate($token);
-                return response()->json([
-                    'message' => 'Unable to retrieve authenticated user.'
-                ], 401);
-            }
-
-            if (!$user->staff) {
-                JWTAuth::invalidate($token);
-                return response()->json([
-                    'message' => 'User account not linked to staff record.'
-                ], 403);
-            }
-
-            if ($user->staff->status !== 'active') {
-                JWTAuth::invalidate($token);
-                return response()->json([
-                    'message' => 'This account is not active.'
-                ], 403);
-            }
-
-            \Log::info('Password login successful', ['email' => $request->email]);
-            return response()->json([
-                'access_token' => $token,
-                'token_type' => 'bearer',
-                'expires_in' => config('jwt.ttl') * 60,
-                'user' => $user->load('staff.role', 'staff.department', 'staff.gradeLevel'),
-            ]);
-
-        } catch (\Throwable $e) {
-            \Log::error('Login error: ' . $e->getMessage());
-            return response()->json([
-                'message' => $e->getMessage(),
-                'exception' => get_class($e),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-            ], 500);
-        }
-    }
-
-    public function requestOTP(Request $request)
-    {
-        $request->validate([
-            'email' => 'required|email|exists:users,email',
-        ]);
-
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user->is_active) {
-            return response()->json(['message' => 'Account is deactivated.'], 403);
-        }
-
-        // Generate OTP
-        $otp = $user->generateOTP();
-
-        \Log::info('OTP requested', [
-            'email' => $request->email,
-            'otp' => $otp
-        ]);
-
-        // Send OTP via email
-        try {
-            Mail::to($user->email)->send(new OTPMail($user, $otp, false));
-            
-            return response()->json([
-                'message' => 'OTP sent to your email.',
-                'email' => $user->email,
-                // Include OTP in response for development
-                'otp' => app()->environment('local') ? $otp : null,
-            ]);
-        } catch (\Exception $e) {
-            \Log::error('Failed to send OTP email: ' . $e->getMessage());
-            
-            return response()->json([
-                'message' => 'Failed to send OTP. Please try again later.',
-            ], 500);
-        }
-    }
-
- public function changePassword(Request $request)
+    /**
+     * Step 2 — Staff sets their FIRST password using the setup token.
+     * Only allowed if must_change_password is still true.
+     */
+public function setPassword(Request $request)
 {
-    $request->validate([
+    $data = $request->validate([
         'password' => 'required|string|min:8|confirmed',
-        'current_password' => 'nullable|string',
     ]);
 
     $user = $request->user();
 
     if (!$user) {
         return response()->json([
-            'message' => 'Unauthenticated.'
+            'message' => 'Unauthenticated.',
         ], 401);
     }
 
     /*
-    |--------------------------------------------------------------------------
-    | First-time password setup
-    |--------------------------------------------------------------------------
-    */
+     * This endpoint is ONLY for first-time password setup.
+     *
+     * A user must:
+     * - still have must_change_password = true
+     * - and should not already have a password
+     */
+    if (!$user->must_change_password || !empty($user->password)) {
+        return response()->json([
+            'message' => 'Password already set. Use change-password instead.',
+        ], 403);
+    }
 
-    if ($user->must_change_password || empty($user->password)) {
+    // User model mutator automatically hashes the password.
+    $user->password = $data['password'];
+    $user->must_change_password = false;
 
-        // User model automatically hashes the password
-        $user->password = $request->password;
-        $user->must_change_password = false;
-        $user->save();
+    $saved = $user->save();
 
-        \Log::info('First-time password created successfully', [
-            'email' => $user->email
+    if (!$saved || empty($user->fresh()->password)) {
+        \Log::error('setPassword failed to persist', [
+            'user_id' => $user->id,
+            'email' => $user->email,
         ]);
 
         return response()->json([
-            'message' => 'Password created successfully.',
-            'must_change_password' => false,
-        ]);
+            'message' => 'Could not save your password. Please try again.',
+        ], 500);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Existing user changing password
-    |--------------------------------------------------------------------------
-    */
-
-    if (!$request->current_password) {
-        return response()->json([
-            'message' => 'Current password is required.'
-        ], 422);
-    }
-
-    if (!Hash::check($request->current_password, $user->password)) {
-        return response()->json([
-            'message' => 'Current password is incorrect.'
-        ], 422);
-    }
-
-    // User model automatically hashes the password
-    $user->password = $request->password;
-    $user->save();
-
-    \Log::info('Password changed successfully', [
-        'email' => $user->email
-    ]);
+    // Setup token is single-use.
+    auth('api')->invalidate();
 
     return response()->json([
-        'message' => 'Password changed successfully.',
-        'must_change_password' => false,
+        'message' => 'Password created. You can now sign in.',
     ]);
 }
+
+    /* ================================================================== */
+    /*  NORMAL LOGIN                                                       */
+    /* ================================================================== */
+
+    public function login(Request $request)
+    {
+        $data = $request->validate([
+            'email'    => 'required|email',
+            'password' => 'required|string',
+        ]);
+
+        $user = User::where('email', $data['email'])->first();
+
+        if (!$user || !$user->is_active) {
+            return response()->json(['message' => 'Invalid credentials.'], 401);
+        }
+
+        // Block login if setup was never completed.
+        if ($user->must_change_password || empty($user->password)) {
+            return response()->json([
+                'message' => 'Please complete your account setup via the link in your email.',
+                'use_setup_flow' => true,
+            ], 403);
+        }
+
+        if (!Hash::check($data['password'], $user->password)) {
+            return response()->json(['message' => 'Invalid credentials.'], 401);
+        }
+
+        $token = auth('api')->login($user);
+
+        return response()->json([
+            'access_token' => $token,
+            'user'         => $user->load('staff'),
+        ]);
+    }
+
+    /* ================================================================== */
+    /*  PASSWORD MANAGEMENT (already-authenticated users)                 */
+    /* ================================================================== */
+
+    /**
+     * Change password — for users who are already signed in.
+     * Requires the current password for verification.
+     */
+    public function changePassword(Request $request)
+    {
+        $data = $request->validate([
+            'current_password' => 'required|string',
+            'password'         => 'required|string|min:8|confirmed',
+        ]);
+
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        if (!Hash::check($data['current_password'], $user->password)) {
+            return response()->json([
+                'message' => 'Current password is incorrect.',
+            ], 422);
+        }
+
+        $user->password = $data['password']; // mutator hashes it
+        $user->save();
+
+        return response()->json([
+            'message' => 'Password changed successfully.',
+        ]);
+    }
+
+    /* ================================================================== */
+    /*  FORGOT PASSWORD — send OTP to existing user                       */
+    /* ================================================================== */
+
+    public function requestOtp(Request $request)
+    {
+        $data = $request->validate(['email' => 'required|email']);
+
+        $user = User::where('email', $data['email'])->first();
+
+        // Always return 200 so we don't leak which emails exist.
+        if ($user && $user->is_active) {
+            $otp = $user->generateOTP();
+            Mail::to($user->email)->send(new WelcomeOTPMail($user, $otp));
+        }
+
+        return response()->json([
+            'message' => 'If your email is registered, an OTP has been sent.',
+        ]);
+    }
+
 
     public function me(Request $request)
     {

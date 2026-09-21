@@ -225,7 +225,7 @@ class StaffController extends Controller
         $staff->delete();
         
         if ($user) {
-            $user->update(['is_active' => false]);
+            $user->update(['active' => false]);
         }
 
         return response()->json(['message' => 'Staff deleted successfully']);

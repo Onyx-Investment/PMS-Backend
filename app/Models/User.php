@@ -117,12 +117,30 @@ public function verifyOTP($otp)
         return $this->belongsTo(User::class);
     }
 
-    public function setPasswordAttribute($value)
+//     public function setPasswordAttribute($value)
+// {
+//     if ($value) {
+//         $this->attributes['password'] = Hash::make($value);
+//         // If password is set, user no longer needs to change it
+//         $this->attributes['must_change_password'] = false;
+//     }
+// }
+
+
+public function setPasswordAttribute($value)
 {
-    if ($value) {
-        $this->attributes['password'] = Hash::make($value);
-        // If password is set, user no longer needs to change it
-        $this->attributes['must_change_password'] = false;
+    // Only hash real values. null / '' leaves the existing password alone.
+    if ($value === null || $value === '') {
+        return;
     }
+
+    $this->attributes['password'] = Hash::make($value);
+}
+
+public function clearPassword(): void
+{
+    $this->attributes['password'] = null;
+    $this->attributes['must_change_password'] = true;
+    $this->save();
 }
 }

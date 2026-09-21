@@ -33,7 +33,7 @@ class OTPMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $subject = $this->isWelcome ? 'Welcome to Onyxial - Your OTP for First Login' : 'Your OTP for Login';
+        $subject = $this->isWelcome ? 'Welcome to Onyx PMS - Your OTP for First Login' : 'Your OTP for Login';
         
         return new Envelope(
             subject: $subject,
@@ -51,6 +51,7 @@ class OTPMail extends Mailable
                 'user' => $this->user,
                 'otp' => $this->otp,
                 'isWelcome' => $this->isWelcome,
+                'loginUrl' => env('FRONTEND_URL') . '/auth/login', // Assuming FRONTEND_URL is set in your .env file
             ],
         );
     }

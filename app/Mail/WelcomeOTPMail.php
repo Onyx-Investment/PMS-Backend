@@ -26,18 +26,32 @@ class WelcomeOTPMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Welcome to Onyxial - Your OTP for First Login',
+            subject: 'Welcome to Onyx PMS - Your OTP for First Login',
         );
     }
 
+    // public function content(): Content
+    // {
+    //     return new Content(
+    //         view: 'emails.welcome-otp',
+    //         with: [
+    //             'user' => $this->user,
+    //             'otp' => $this->otp,
+    //             'loginUrl' => env('FRONTEND_URL') . '/auth/login', // Assuming FRONTEND_URL is set in your .env file
+    //         ],
+    //     );
+    // }
+
     public function content(): Content
-    {
-        return new Content(
-            view: 'emails.welcome-otp',
-            with: [
-                'user' => $this->user,
-                'otp' => $this->otp,
-            ],
-        );
-    }
+{
+    return new Content(
+        view: 'emails.welcome-otp',
+        with: [
+            'user'     => $this->user,
+            'otp'      => $this->otp,
+            'setupUrl' => env('FRONTEND_URL')
+                        . '/auth/verify-otp?email=' . urlencode($this->user->email),
+        ],
+    );
+}
 }

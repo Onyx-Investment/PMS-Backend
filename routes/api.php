@@ -31,9 +31,32 @@ use App\Http\Controllers\Api\InternalTaskController;
 
 use Illuminate\Support\Facades\Route;
 
-Route::post('/auth/login', [AuthController::class, 'login']);
-Route::post('/auth/request-otp', [AuthController::class, 'requestOTP']);
-Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+// Route::post('/auth/login', [AuthController::class, 'login']);
+// Route::post('/auth/request-otp', [AuthController::class, 'requestOTP']);
+// Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+
+//  Route::post('/auth/verify-otp',      [AuthController::class, 'verifyOtp']);
+//     Route::post('/auth/set-password',    [AuthController::class, 'setPassword']);
+//     // Route::post('/login',           [AuthController::class, 'login']);
+
+
+// routes/api.php
+
+
+Route::prefix('auth')->group(function () {
+    // Public — no token required
+    Route::post('/login',       [AuthController::class, 'login']);
+    Route::post('/verify-otp',  [AuthController::class, 'verifyOtp']);
+    Route::post('/request-otp', [AuthController::class, 'requestOtp']);
+
+    // Requires the short-lived setup token (from verify-otp)
+    Route::post('/set-password', [AuthController::class, 'setPassword'])
+        ->middleware('auth:api');
+
+    // Requires a full access token (from login)
+    Route::post('/change-password', [AuthController::class, 'changePassword'])
+        ->middleware('auth:api');
+});
 
 Route::middleware('auth:api')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);

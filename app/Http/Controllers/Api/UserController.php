@@ -21,7 +21,7 @@ class UserController extends Controller
                     ->orWhere('last_name', 'like', "%{$request->search}%")
                     ->orWhere('email', 'like', "%{$request->search}%");
             }))
-            ->orderBy('first_name')
+            ->orderBy('firstName')
             ->paginate(20);
 
         return response()->json($users);

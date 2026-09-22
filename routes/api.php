@@ -49,6 +49,7 @@ Route::prefix('auth')->group(function () {
     Route::post('/verify-otp',  [AuthController::class, 'verifyOtp']);
     Route::post('/request-otp', [AuthController::class, 'requestOtp']);
  
+    
     // Requires the short-lived setup token (from verify-otp)
     Route::post('/set-password', [AuthController::class, 'setPassword'])
         ->middleware('auth:api');

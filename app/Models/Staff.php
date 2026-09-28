@@ -18,6 +18,7 @@ class Staff extends Model
         'status',
         'joined_date',
         'cost_per_hour',
+        'annual_salary',
         'is_active',
         'nin',
         'gender',
@@ -26,12 +27,20 @@ class Staff extends Model
         'bank_account_number',
         'bank_account_name',
         'passport',
+        
     ];
 
     protected $casts = [
         'joined_date' => 'date',
         'cost_per_hour' => 'decimal:2',
+        'annual_salary' => 'decimal:2',
         'is_active' => 'boolean',
+    ];
+
+    // Computed attributes always included in API responses, so the
+    // frontend doesn't have to re-derive the grade-level fallback itself.
+    protected $appends = [
+        'effective_annual_salary',
     ];
 
     // --- Relations ---
@@ -121,6 +130,36 @@ class Staff extends Model
         return $this->cost_per_hour ?? $this->gradeLevel?->cost_per_hour ?? 0;
     }
 
+    /**
+     * This staff member's annual salary — their own annual_salary if one
+     * has been set, otherwise falling back to their grade level's default.
+     * Null if neither is configured (no grade level, or the grade level
+     * has no default set either).
+     */
+// app/Models/Staff.php
+public function getEffectiveAnnualSalaryAttribute(): ?float
+{
+    if ($this->annual_salary !== null) {
+        return (float) $this->annual_salary;
+    }
+
+    // Matches the frontend's own priority: step's own salary, then the
+    // step's cost_per_hour annualized, before falling back to the grade
+    // level's default (kept only for older records with no step set).
+    if ($this->step) {
+        if ($this->step->salary !== null) {
+            return (float) $this->step->salary;
+        }
+        if ($this->step->cost_per_hour) {
+            return (float) $this->step->cost_per_hour * 2080;
+        }
+    }
+
+    return $this->gradeLevel?->annual_salary !== null
+        ? (float) $this->gradeLevel->annual_salary
+        : null;
+}
+
     public function getEmailAttribute()
     {
         return $this->user?->email;
@@ -140,4 +179,6 @@ class Staff extends Model
     {
         return $this->user?->last_name;
     }
+
+    
 }

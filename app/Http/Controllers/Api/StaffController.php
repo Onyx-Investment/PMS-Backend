@@ -18,7 +18,7 @@ class StaffController extends Controller
 {
     public function index(Request $request)
     {
-        $staff = Staff::with(['user', 'departments', 'roles', 'gradeLevel', 'staffManager.user', 'staffType'])
+        $staff = Staff::with(['user', 'departments', 'roles', 'gradeLevel', 'step', 'staffManager.user', 'staffType'])
             ->when($request->department_id, fn($q) => $q->whereHas('departments', function($query) use ($request) {
                 $query->where('department_id', $request->department_id);
             }))
@@ -86,10 +86,21 @@ class StaffController extends Controller
             'role_ids' => 'nullable|array',
             'role_ids.*' => 'exists:roles,id',
             'grade_level_id' => 'nullable|exists:grade_levels,id',
+            // The step the staff member is currently on within their grade
+            // level. Was previously missing from this validation array, so
+            // Laravel's validate() silently dropped it before it ever
+            // reached $staffData below — step_id was never persisted no
+            // matter what the frontend sent.
+            'step_id' => 'nullable|exists:steps,id',
             'staff_manager_id' => 'nullable|exists:staff,id',
             'status' => 'nullable|in:active,inactive,on_leave',
             'joined_date' => 'nullable|date',
             'cost_per_hour' => 'nullable|numeric|min:0',
+            // Personal override of the grade level's default annual salary.
+            // Left null/blank -> Staff::effective_annual_salary falls back
+            // to the selected step's salary (or the grade level's, if no
+            // step is set).
+            'annual_salary' => 'nullable|numeric|min:0',
             'auto_generate_employee_no' => 'boolean',
         ]);
 
@@ -115,10 +126,12 @@ class StaffController extends Controller
             'employee_no' => $data['employee_no'],
             'designation' => $data['designation'] ?? null,
             'grade_level_id' => $data['grade_level_id'] ?? null,
+            'step_id' => $data['step_id'] ?? null,
             'staff_manager_id' => $data['staff_manager_id'] ?? null,
             'status' => $data['status'] ?? 'active',
             'joined_date' => $data['joined_date'] ?? null,
             'cost_per_hour' => $data['cost_per_hour'] ?? null,
+            'annual_salary' => $data['annual_salary'] ?? null,
             'is_active' => true,
         ];
         
@@ -149,7 +162,7 @@ class StaffController extends Controller
 
     return response()->json([
         'message' => 'Staff created successfully. An OTP has been sent to their email.',
-        'staff' => $staff->load(['user', 'departments', 'roles', 'gradeLevel']),
+        'staff' => $staff->load(['user', 'departments', 'roles', 'gradeLevel', 'step']),
     ], 201);
 
         // return response()->json([
@@ -161,7 +174,7 @@ class StaffController extends Controller
 
     public function show(Staff $staff)
     {
-        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel', 'staffManager', 'staffType']));
+        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel', 'step', 'staffManager', 'staffType']));
     }
 
     public function update(Request $request, Staff $staff)
@@ -175,10 +188,19 @@ class StaffController extends Controller
             'role_ids' => 'nullable|array',
             'role_ids.*' => 'exists:roles,id',
             'grade_level_id' => 'nullable|exists:grade_levels,id',
+            // Same story as store(): this was missing here too, which is
+            // why editing a staff member and picking a step never actually
+            // saved it — $staff->update($data) below only ever received
+            // the fields listed in this array.
+            'step_id' => 'nullable|exists:steps,id',
             'staff_manager_id' => 'nullable|exists:staff,id',
             'status' => 'nullable|in:active,inactive,on_leave',
             'joined_date' => 'nullable|date',
             'cost_per_hour' => 'nullable|numeric|min:0',
+            // Same override rule as store(): null clears the personal
+            // override and falls back to the selected step's (or grade
+            // level's) default.
+            'annual_salary' => 'nullable|numeric|min:0',
             'gender' => 'nullable|in:male,female',
             'marital_status' => 'nullable|in:single,married,divorced,widowed',
             'nin' => 'nullable|string|max:255',
@@ -207,7 +229,7 @@ class StaffController extends Controller
             $staff->user->update($userData);
         }
 
-        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel', 'staffType']));
+        return response()->json($staff->load(['user', 'departments', 'roles', 'gradeLevel', 'step', 'staffType']));
     }
 
     public function destroy(Staff $staff)
@@ -233,7 +255,7 @@ class StaffController extends Controller
 
     public function getActiveStaff()
     {
-        $staff = Staff::with(['user', 'departments', 'roles', 'gradeLevel', 'staffType'])
+        $staff = Staff::with(['user', 'departments', 'roles', 'gradeLevel', 'step', 'staffType'])
             ->where('status', 'active')
             ->whereHas('user', fn($q) => $q->where('is_active', true))
             ->orderBy('created_at', 'desc')

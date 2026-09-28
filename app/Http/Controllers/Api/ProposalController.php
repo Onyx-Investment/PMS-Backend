@@ -63,19 +63,41 @@ class ProposalController extends Controller
         return response()->json($proposal->load(['lead.client', 'preparedBy', 'reviewedBy', 'documents.uploadedBy']));
     }
 
-    public function update(Request $request, Proposal $proposal)
-    {
-        $data = $request->validate([
-            'status' => 'sometimes|in:draft,submitted,reviewed,approved,converted,lost',
-            'title' => 'sometimes|string|max:255',
-            'proposal_no' => 'sometimes|string',
-            'submission_date' => 'nullable|date',
-        ]);
+  public function update(Request $request, Proposal $proposal)
+{
+    /*
+     * Two separate concerns:
+     *
+     * 1. Editing metadata (title, proposal_no, submission_date)
+     *    Only allowed while the proposal is still a draft.
+     *
+     * 2. Changing status (via the status-change modal on the frontend)
+     *    Allowed any time, but the new status must be a valid enum value.
+     */
 
-        $proposal->update($data);
+    $data = $request->validate([
+        'status'           => 'sometimes|in:draft,submitted,reviewed,approved,converted,lost',
+        'title'            => 'sometimes|string|max:255',
+        'proposal_no'      => 'sometimes|nullable|string|max:255',
+        'submission_date'  => 'sometimes|nullable|date',
+    ]);
 
-        return response()->json($proposal->load(['lead.client', 'preparedBy', 'reviewedBy', 'documents']));
+    // If the request contains metadata edits (not just a status change),
+    // enforce the draft-only rule.
+    $isMetadataEdit = $request->hasAny(['title', 'proposal_no', 'submission_date']);
+
+    if ($isMetadataEdit && $proposal->status !== 'draft') {
+        return response()->json([
+            'message' => 'Only draft proposals can be edited. Submit workflow is already in progress.',
+        ], 422);
     }
+
+    $proposal->update($data);
+
+    return response()->json(
+        $proposal->load(['lead.client', 'preparedBy', 'reviewedBy', 'documents'])
+    );
+}
 
     public function submit(Request $request, Proposal $proposal)
     {
@@ -161,11 +183,27 @@ class ProposalController extends Controller
         return response()->json($project, 201);
     }
 
-    public function destroy(Proposal $proposal)
-    {
-        $proposal->delete();
-        return response()->json(['message' => 'Proposal deleted.']);
+   public function destroy(Proposal $proposal)
+{
+    // Don't allow deleting a proposal that became a project — that would orphan the project.
+    if ($proposal->status === 'converted') {
+        return response()->json([
+            'message' => 'Cannot delete a converted proposal. Delete the related project first.',
+        ], 422);
     }
+
+    // Delete all attached documents from storage first
+    foreach ($proposal->documents as $doc) {
+        if (Storage::disk('public')->exists($doc->file_path)) {
+            Storage::disk('public')->delete($doc->file_path);
+        }
+        $doc->delete();
+    }
+
+    $proposal->delete();
+
+    return response()->json(['message' => 'Proposal deleted successfully.']);
+}
 
     /**
      * Generate a unique proposal code

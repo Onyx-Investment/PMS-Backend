@@ -13,10 +13,14 @@ class GradeLevel extends Model
         'backend_code',
         'category',
         'description',
+        // Default annual salary for staff on this grade — overridden per
+        // person by Staff::annual_salary (see Staff::effective_annual_salary).
+        'annual_salary',
     ];
 
     protected $casts = [
         'level' => 'integer',
+        'annual_salary' => 'decimal:2',
     ];
 
     public function users()

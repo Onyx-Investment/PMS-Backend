@@ -28,6 +28,9 @@ class GradeLevelController extends Controller
             'backend_code' => 'required|string|max:50|unique:grade_levels,backend_code',
             'category' => 'required|in:technical,support',
             'description' => 'nullable|string',
+            // Default annual salary for staff on this grade, unless a
+            // staff member has their own override (Staff::annual_salary).
+            'annual_salary' => 'nullable|numeric|min:0',
         ]);
 
         $gradeLevel = GradeLevel::create($data);
@@ -47,6 +50,7 @@ class GradeLevelController extends Controller
             'backend_code' => ['sometimes', 'string', 'max:50', Rule::unique('grade_levels')->ignore($gradeLevel->id)],
             'category' => 'sometimes|in:technical,support',
             'description' => 'nullable|string',
+            'annual_salary' => 'nullable|numeric|min:0',
         ]);
 
         $gradeLevel->update($data);

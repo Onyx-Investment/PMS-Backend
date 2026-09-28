@@ -37,6 +37,41 @@ class User extends Authenticatable implements JWTSubject
         'otp_expires_at' => 'datetime',
     ];
 
+    // app/Models/User.php
+
+    // 'roles' / 'role' are appended so every response that returns a User
+    // (login, /auth/me, refresh) carries role info at the top level —
+    // this is the exact shape DashboardRouter.tsx already expects
+    // (`user?.role` as a string and/or `user?.roles` as an array), so the
+    // frontend needed no changes to consume multiple roles once these
+    // exist.
+    protected $appends = ['has_password', 'roles', 'role'];
+
+    public function getHasPasswordAttribute(): bool
+    {
+        return !empty($this->attributes['password'] ?? null);
+    }
+
+    /**
+     * All role slugs assigned to this user's staff record, via the
+     * staff_role pivot (Staff::roles()). Empty array if the user has no
+     * staff record or no roles assigned yet.
+     */
+    public function getRolesAttribute(): array
+    {
+        return $this->staff?->roles?->pluck('slug')->filter()->values()->all() ?? [];
+    }
+
+    /**
+     * The "primary" role — first of the assigned roles. Kept only for
+     * places (older frontend code, JWT consumers) that still expect a
+     * single role string. Prefer `roles` (the full list) for anything new.
+     */
+    public function getRoleAttribute(): ?string
+    {
+        return $this->roles[0] ?? null;
+    }
+
     // --- JWTSubject ---
 
     public function getJWTIdentifier()
@@ -47,7 +82,10 @@ class User extends Authenticatable implements JWTSubject
     public function getJWTCustomClaims()
     {
         return [
-            'role' => $this->staff?->role?->slug,
+            // 'role' kept for backward compatibility with anything decoding
+            // the token and expecting a single role string.
+            'role' => $this->role,
+            'roles' => $this->roles,
             'staff_id' => $this->staff?->id,
         ];
     }
@@ -66,13 +104,21 @@ class User extends Authenticatable implements JWTSubject
         return trim("{$this->first_name} {$this->last_name}");
     }
 
+    /**
+     * True if this user's staff record has ANY of the given role slugs
+     * assigned (not just one specific role). e.g. $user->hasRole('admin', 'hr')
+     */
     public function hasRole(string ...$slugs): bool
     {
-        if (!$this->staff || !$this->staff->role) {
+        if (!$this->staff) {
             return false;
         }
 
-        return in_array($this->staff->role->slug, $slugs, true);
+        $assigned = $this->staff->relationLoaded('roles')
+            ? $this->staff->roles
+            : $this->staff->roles()->get();
+
+        return $assigned->pluck('slug')->intersect($slugs)->isNotEmpty();
     }
 
     public function generateOTP()

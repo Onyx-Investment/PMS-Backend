@@ -28,6 +28,10 @@ use App\Http\Controllers\Api\ProjectReportController;
 use App\Http\Controllers\Api\StepController;
 use App\Http\Controllers\Api\StaffDocumentController;
 use App\Http\Controllers\Api\InternalTaskController;
+use App\Http\Controllers\Api\LeaveTypeController;
+use App\Http\Controllers\Api\LeaveRequestController;
+use App\Http\Controllers\Api\DeviceController;
+use App\Http\Controllers\Api\DeviceAllocationController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -43,20 +47,40 @@ use Illuminate\Support\Facades\Route;
 // routes/api.php
 
 
-Route::prefix('auth')->group(function () {
-    // Public — no token required
-    Route::post('/login',       [AuthController::class, 'login']);
-    Route::post('/verify-otp',  [AuthController::class, 'verifyOtp']);
-    Route::post('/request-otp', [AuthController::class, 'requestOtp']);
+// Route::prefix('auth')->group(function () {
+//     // Public — no token required
+//     Route::post('/login',       [AuthController::class, 'login']);
+//     Route::post('/verify-otp',  [AuthController::class, 'verifyOtp']);
+//     Route::post('/request-otp', [AuthController::class, 'requestOtp']);
  
-    
-    // Requires the short-lived setup token (from verify-otp)
-    Route::post('/set-password', [AuthController::class, 'setPassword'])
-        ->middleware('auth:api');
 
-    // Requires a full access token (from login)
-    Route::post('/change-password', [AuthController::class, 'changePassword'])
-        ->middleware('auth:api');
+//     // Requires the short-lived setup token (from verify-otp)
+//     Route::post('/set-password', [AuthController::class, 'setPassword'])
+//         ->middleware('auth:api');
+
+//     // Requires a full access token (from login)
+//     Route::post('/change-password', [AuthController::class, 'changePassword'])
+//         ->middleware('auth:api');
+// });
+
+Route::prefix('auth')->group(function () {
+    Route::post('/login',            [AuthController::class, 'login']);
+    Route::post('/verify-otp',       [AuthController::class, 'verifyOtp']);
+    Route::post('/request-otp',      [AuthController::class, 'requestOtp']);
+    Route::post('/set-password',     [AuthController::class, 'setPassword'])->middleware('auth:api');
+    Route::post('/change-password',  [AuthController::class, 'changePassword'])->middleware('auth:api');
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+});
+
+// Route::post('/auth/verify-otp', [AuthController::class, 'verifyOtp']);
+// Route::post('/auth/set-password', [AuthController::class, 'setPassword']);
+
+
+// Admin-only endpoints
+Route::middleware('auth:api')->prefix('admin/staff')->group(function () {
+    Route::post('resend-setup-otp',    [AuthController::class, 'resendSetupOtp']);
+    Route::post('send-password-reset', [AuthController::class, 'sendPasswordReset']);
+    Route::post('force-reset',         [AuthController::class, 'forceResetAccount']);
 });
 
 Route::middleware('auth:api')->group(function () {
@@ -68,6 +92,8 @@ Route::middleware('auth:api')->group(function () {
 
     Route::apiResource('staff-types', StaffTypeController::class);
     Route::get('/staff-types/active/list', [StaffTypeController::class, 'getActiveTypes']);
+
+    Route::get('/tasks/assigned-to-me', [TaskController::class, 'assignedToMe']);
 
 // Department Routes
 Route::prefix('departments')->group(function () {
@@ -211,6 +237,9 @@ Route::prefix('time-codes')->group(function () {
 });
 
 // Time entries for staff/project
+Route::get('time-entries/billable', [TimeEntryController::class, 'billable']);
+Route::get('time-entries/non-billable', [TimeEntryController::class, 'nonBillable']);
+// Route::apiResource('time-entries', TimeEntryController::class);  // stays below
 Route::get('/time-entries', [TimeEntryController::class, 'getStaffProjectEntries']);
 
 
@@ -304,4 +333,45 @@ Route::get('/proposals/{proposal}/documents/{documentId}/download', [ProposalCon
 
     Route::get('/reports/project/{projectId}', [ProjectReportController::class, 'generate']);
     Route::get('/reports/project/{projectId}/export', [ProjectReportController::class, 'export']);
+
+
+    
+    // Route::apiResource('leave-types', LeaveTypeController::class);
+    // Leave Requests
+    Route::get('/leave-types/preview-code', [LeaveTypeController::class, 'previewCode']);
+Route::post('/leave-types/{leaveType}/entitlements', [LeaveTypeController::class, 'storeEntitlement']);
+Route::put('/leave-types/{leaveType}/entitlements/{entitlement}', [LeaveTypeController::class, 'updateEntitlement']);
+Route::delete('/leave-types/{leaveType}/entitlements/{entitlement}', [LeaveTypeController::class, 'destroyEntitlement']);
+Route::apiResource('leave-types', LeaveTypeController::class);
+ 
+// Leave Requests — same ordering rule applies to the two literal routes below
+
+Route::get('/leave-requests/pending-approvals', [LeaveRequestController::class, 'pendingApprovals']);
+Route::get('/leave-requests/my-balances', [LeaveRequestController::class, 'myBalances']);
+Route::get('/staff/{staff}/leave-balances', [LeaveRequestController::class, 'balancesForStaff']);
+Route::post('/leave-requests/{leaveRequest}/approve', [LeaveRequestController::class, 'approve']);
+Route::post('/leave-requests/{leaveRequest}/reject', [LeaveRequestController::class, 'reject']);
+Route::post('/leave-requests/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel']);
+
+
+
+Route::get('/leave-requests/payments', [LeaveRequestController::class, 'payments']);
+Route::get('/leave-requests/my-earnings', [LeaveRequestController::class, 'myEarnings']);
+Route::get('/leave-requests/staff/{staff}/earnings', [LeaveRequestController::class, 'earningsForStaff']);
+
+Route::post('leave-requests/{leaveRequest}/mark-paid', [LeaveRequestController::class, 'markAsPaid']);
+Route::post('leave-requests/{leaveRequest}/unmark-paid', [LeaveRequestController::class, 'unmarkAsPaid']);
+
+Route::post('leave-requests/{leaveRequest}/curtail', [LeaveRequestController::class, 'curtail']);
+ 
+Route::apiResource('leave-requests', LeaveRequestController::class)->except(['update', 'destroy']);
+
+Route::get('devices/preview-asset-tag', [DeviceController::class, 'previewAssetTag']);
+Route::get('devices/available/list', [DeviceController::class, 'available']);
+Route::apiResource('devices', DeviceController::class);
+
+Route::get('device-allocations', [DeviceAllocationController::class, 'index']);
+Route::get('staff/{staff}/device-allocations', [DeviceAllocationController::class, 'forStaff']);
+Route::post('device-allocations/allocate', [DeviceAllocationController::class, 'allocate']);
+Route::post('device-allocations/{deviceAllocation}/retrieve', [DeviceAllocationController::class, 'retrieve']);
 });

@@ -30,6 +30,7 @@ return new class extends Migration
             ['name' => 'Finance', 'slug' => 'finance'],
             ['name' => 'HR', 'slug' => 'hr'],
             ['name' => 'Admin', 'slug' => 'admin'],
+            ['name' => 'Staff', 'slug' => 'staff'],
         ];
 
         $now = now();

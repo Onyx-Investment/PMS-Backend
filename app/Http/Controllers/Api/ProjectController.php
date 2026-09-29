@@ -58,14 +58,15 @@ class ProjectController extends Controller
                 // Check if the owner is a staff member
                 $staff = \App\Models\Staff::where('user_id', $proposal->lead->owner_id)->first();
                 if ($staff) {
-                    ProjectTeam::create([
-                        'project_id' => $project->id,
-                        'staff_id' => $staff->id,
-                        'role' => 'lead',
-                        'planned_hours' => 0,
-                        'billable_rate' => 0,
-                    ]);
-                }
+    ProjectTeam::create([
+        'project_id' => $project->id,
+        'staff_id' => $staff->id,
+        'user_id' => $proposal->lead->owner_id,
+        'role' => 'lead',
+        'planned_hours' => 0,
+        'billable_rate' => 0,
+    ]);
+}
             }
         }
 
@@ -222,25 +223,27 @@ class ProjectController extends Controller
      * Add team member to project
      */
     public function addTeamMember(Request $request, Project $project)
-    {
-        $data = $request->validate([
-            'staff_id' => 'required|exists:staff,id',
-            'role' => 'required|in:lead,am,consultant,reviewer',
-            'planned_hours' => 'nullable|numeric|min:0',
-            'billable_rate' => 'nullable|numeric|min:0',
-        ]);
+{
+    $data = $request->validate([
+        'staff_id' => 'required|exists:staff,id',
+        'role' => 'required|in:lead,am,consultant,reviewer',
+        'planned_hours' => 'nullable|numeric|min:0',
+        'billable_rate' => 'nullable|numeric|min:0',
+    ]);
 
-        // Check if staff already assigned
-        if ($project->team()->where('staff_id', $data['staff_id'])->exists()) {
-            return response()->json([
-                'message' => 'This staff member is already assigned to the project.'
-            ], 422);
-        }
-
-        $member = $project->team()->create($data);
-
-        return response()->json($member, 201);
+    if ($project->team()->where('staff_id', $data['staff_id'])->exists()) {
+        return response()->json([
+            'message' => 'This staff member is already assigned to the project.'
+        ], 422);
     }
+
+    $staffMember = \App\Models\Staff::findOrFail($data['staff_id']);
+    $data['user_id'] = $staffMember->user_id;
+
+    $member = $project->team()->create($data);
+
+    return response()->json($member, 201);
+}
 
     /**
      * Remove team member from project
